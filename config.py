@@ -39,6 +39,8 @@ class Settings:
 
 
 DATA_FILE = Path("data.json")
+ENV_PRODUCT_MIN_PRICE = 0.0
+ENV_PRODUCT_MAX_PRICE = 1_000_000.0
 DEFAULT_DATA = {
     "products": [{"keyword": "iphone", "min_price": 50.0, "max_price": 200.0}],
     "chat_groups": "all",
@@ -58,9 +60,29 @@ def _atomic_save_json(path: Path, payload: dict[str, Any]) -> None:
     tmp_path.replace(path)
 
 
-def _load_data(path: Path = DATA_FILE) -> dict[str, Any]:
+def _env_products_from_keywords(keywords: list[str]) -> list[dict[str, float | str]]:
+    return [
+        {
+            "keyword": keyword,
+            "min_price": ENV_PRODUCT_MIN_PRICE,
+            "max_price": ENV_PRODUCT_MAX_PRICE,
+        }
+        for keyword in keywords
+    ]
+
+
+def _initial_data_from_env(chat_groups: str | None, product_keywords: list[str]) -> dict[str, Any]:
+    data = _default_data()
+    if product_keywords:
+        data["products"] = _env_products_from_keywords(product_keywords)
+    if chat_groups:
+        data["chat_groups"] = _parse_chat_groups(chat_groups)
+    return data
+
+
+def _load_data(path: Path = DATA_FILE, initial_data: dict[str, Any] | None = None) -> dict[str, Any]:
     if not path.exists():
-        data = _default_data()
+        data = deepcopy(initial_data) if initial_data is not None else _default_data()
         _atomic_save_json(path, data)
         return data
     with path.open("r", encoding="utf-8") as file:
@@ -109,7 +131,9 @@ def _parse_chat_groups(raw: Any) -> str | list[str]:
 
 def load_settings() -> Settings:
     load_dotenv()
-    data = _load_data()
+    chat_groups_env = os.getenv("CHAT_GROUPS")
+    product_keywords_env = _split_csv(os.getenv("PRODUCTS_KEYWORDS", ""))
+    data = _load_data(initial_data=_initial_data_from_env(chat_groups_env, product_keywords_env))
 
     required = {
         "API_ID": os.getenv("API_ID"),
@@ -127,8 +151,21 @@ def load_settings() -> Settings:
     except ValueError as exc:
         raise RuntimeError("API_ID and MAIN_USER_ID must be integers") from exc
 
-    products = _parse_products(data.get("products", DEFAULT_DATA["products"]))
-    chat_groups = _parse_chat_groups(data.get("chat_groups", DEFAULT_DATA["chat_groups"]))
+    products_raw = data.get("products")
+    if products_raw is None and product_keywords_env:
+        products_raw = _env_products_from_keywords(product_keywords_env)
+    products = _parse_products(products_raw or DEFAULT_DATA["products"])
+
+    chat_groups_raw = data.get("chat_groups")
+    if chat_groups_raw is None and chat_groups_env:
+        chat_groups_raw = chat_groups_env
+    chat_groups = _parse_chat_groups(chat_groups_raw if chat_groups_raw is not None else DEFAULT_DATA["chat_groups"])
+    keywords = list(
+        dict.fromkeys(
+            [product.keyword.lower() for product in products]
+            + [keyword.lower() for keyword in product_keywords_env]
+        )
+    )
 
     return Settings(
         api_id=api_id,
@@ -137,5 +174,5 @@ def load_settings() -> Settings:
         main_user_id=main_user_id,
         chat_groups=chat_groups,
         products=products,
-        keywords=[product.keyword.lower() for product in products],
+        keywords=keywords,
     )

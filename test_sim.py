@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -9,7 +10,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 import app as dashboard_app
-from config import Product, Settings
+from config import Product, Settings, load_settings
 from main import build_handler
 from storage import add_finding, get_findings
 from verifier import (
@@ -63,6 +64,29 @@ def test_check_price_range() -> None:
     assert check_price_range("Notebook em oferta por R$ 1.500,00", products) == (1500.0, True)
     assert check_price_range("Notebook em oferta por R$ 2.500,00", products) == (2500.0, False)
     assert check_price_range("Smartphone em oferta por R$ 1.500,00", products) == (1500.0, False)
+
+
+def test_load_settings_reads_env_and_bootstraps_data(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("API_ID", "123456")
+    monkeypatch.setenv("API_HASH", "test_hash")
+    monkeypatch.setenv("PHONE", "+5500000000000")
+    monkeypatch.setenv("MAIN_USER_ID", "42")
+    monkeypatch.setenv("CHAT_GROUPS", "grupo-a,grupo-b")
+    monkeypatch.setenv("PRODUCTS_KEYWORDS", "notebook,ssd")
+
+    settings = load_settings()
+
+    assert settings.api_id == 123456
+    assert settings.api_hash == "test_hash"
+    assert settings.phone == "+5500000000000"
+    assert settings.main_user_id == 42
+    assert settings.chat_groups == ["grupo-a", "grupo-b"]
+    assert settings.product_keywords == ["notebook", "ssd"]
+
+    data = json.loads((tmp_path / "data.json").read_text(encoding="utf-8"))
+    assert [product["keyword"] for product in data["products"]] == ["notebook", "ssd"]
+    assert data["chat_groups"] == ["grupo-a", "grupo-b"]
 
 
 def test_ssrf_private_urls_are_blocked() -> None:
