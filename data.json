@@ -1,0 +1,10 @@
+{
+  "products": [
+    {
+      "keyword": "iphone",
+      "min_price": 50.0,
+      "max_price": 200.0
+    }
+  ],
+  "chat_groups": "all"
+}
