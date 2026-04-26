@@ -10,9 +10,8 @@ dependencies = [
     "beautifulsoup4",
     "lxml",
     "fastapi",
-    "jinja2",
-    "python-multipart",
     "uvicorn[std]",
+    "httpx",
 ]
 
 [tool.pytest.ini_options]

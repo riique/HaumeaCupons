@@ -1,6 +1,6 @@
 # HaumeaCupons
 
-Telethon bot para monitorar grupos/canais do Telegram, detectar mensagens com palavras-chave de produtos, extrair links e cupons, verificar páginas com `aiohttp` + BeautifulSoup, validar faixa de preço e enviar alertas para o usuário principal. Inclui dashboard FastAPI para editar produtos/grupos e acompanhar `logs/alerts.jsonl`.
+Telethon bot para monitorar grupos/canais do Telegram, detectar mensagens com palavras-chave de produtos, extrair links e cupons, verificar páginas com `aiohttp` + BeautifulSoup, validar faixa de preço e enviar alertas para o usuário principal. Inclui dashboard FastAPI + React para editar produtos/grupos e acompanhar findings em SQLite.
 
 ## Setup
 
@@ -40,6 +40,16 @@ uvicorn app:app --host 127.0.0.1 --port 8000
 
 Abra `http://127.0.0.1:8000`. A tela permite adicionar, editar, listar e excluir produtos, atualizar grupos e acompanhar findings com polling em `/api/findings`.
 
+Em produção, gere o build do frontend antes de subir o FastAPI:
+
+```bash
+cd frontend
+npm install
+npm run build
+```
+
+O backend serve `frontend/dist/index.html` em `/` e mantém as APIs em `/api/*`.
+
 Para expor via Cloudflare Tunnel:
 
 ```bash
@@ -51,7 +61,8 @@ Para expor via Cloudflare Tunnel:
 - O dashboard não tem autenticação própria; mantenha o bind em `127.0.0.1` quando for uso local.
 - Ao usar túnel público, proteja o acesso com Cloudflare Access ou outra camada de autenticação.
 - `data.json` é salvo de forma atômica para reduzir risco de corrupção em queda/interrupção.
-- Os formulários validam índices, keyword e faixa de preço; o parser ignora linhas JSONL inválidas em `logs/alerts.jsonl`.
+- A API valida produtos, grupos e faixa de preço com Pydantic.
+- O verificador bloqueia URLs locais/privadas, limita redirects, limita resposta a 1MB e usa concorrência controlada.
 - Não coloque tokens, sessão Telethon ou `.env` em repositório público.
 
 ## Teste local
@@ -67,11 +78,12 @@ python -m pytest test_sim.py
 ## Arquivos
 
 - `config.py`: leitura e validação de ambiente.
-- `app.py`: dashboard FastAPI/Jinja2.
-- `templates/index.html`: UI Tailwind CDN responsiva.
+- `app.py`: API FastAPI e entrega do build React.
+- `frontend/`: dashboard React + TypeScript + Tailwind.
+- `storage.py`: persistência SQLite de findings.
 - `data.json`: produtos e grupos monitorados.
 - `verifier.py`: extração de links/cupons e verificação HTTP/HTML.
-- `main.py`: cliente Telethon, handler `NewMessage`, alerta e logs.
+- `main.py`: cliente Telethon, handler `NewMessage`, alerta, hot-reload e findings.
 - `test_sim.py`: simulação dummy de login/evento.
-- `logs/`: saída local de execução e alertas JSONL.
+- `logs/`: saída local de execução e banco SQLite.
 - `tunnel.sh`: túnel Cloudflare para `localhost:8000`.

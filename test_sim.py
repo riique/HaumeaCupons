@@ -6,9 +6,20 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+from fastapi.testclient import TestClient
+
+import app as dashboard_app
 from config import Product, Settings
 from main import build_handler
-from verifier import VerificationResult, extract_coupons, extract_links
+from storage import add_finding, get_findings
+from verifier import (
+    VerificationResult,
+    check_price_range,
+    extract_coupons,
+    extract_links,
+    parse_price,
+    validate_public_url,
+)
 
 
 @dataclass
@@ -35,9 +46,39 @@ class DummyEvent:
 
 
 def test_extract_links_and_coupons() -> None:
-    text = "Notebook em promo https://example.com/oferta. Cupom: SAVE10"
+    text = "Notebook em promo https://example.com/oferta. https://example.com/oferta Cupom: SAVE10"
     assert extract_links(text) == ["https://example.com/oferta"]
     assert extract_coupons(text) == ["SAVE10"]
+
+
+def test_parse_price_formats() -> None:
+    assert parse_price("Notebook por R$ 1.234,56") == 1234.56
+    assert parse_price("Oferta BRL 1999.90") == 1999.90
+    assert parse_price("Preço 899,90 reais") == 899.90
+    assert parse_price("Sem preço aqui") is None
+
+
+def test_check_price_range() -> None:
+    products = [Product(keyword="notebook", min_price=1000.0, max_price=2000.0)]
+    assert check_price_range("Notebook em oferta por R$ 1.500,00", products) == (1500.0, True)
+    assert check_price_range("Notebook em oferta por R$ 2.500,00", products) == (2500.0, False)
+    assert check_price_range("Smartphone em oferta por R$ 1.500,00", products) == (1500.0, False)
+
+
+def test_ssrf_private_urls_are_blocked() -> None:
+    async def run_case() -> None:
+        localhost_allowed, localhost_reason = await validate_public_url("http://localhost:8000")
+        private_allowed, private_reason = await validate_public_url("http://127.0.0.1:8000")
+        lan_allowed, lan_reason = await validate_public_url("http://192.168.0.1")
+
+        assert localhost_allowed is False
+        assert "local" in localhost_reason
+        assert private_allowed is False
+        assert "private" in private_reason
+        assert lan_allowed is False
+        assert "private" in lan_reason
+
+    asyncio.run(run_case())
 
 
 def test_handler_simule_dummy_login_alert() -> None:
@@ -48,7 +89,7 @@ def test_handler_simule_dummy_login_alert() -> None:
                 api_hash="hash",
                 phone="+5500000000000",
                 main_user_id=42,
-                chat_groups=["dummy"],
+                chat_groups="all",
                 products=[Product(keyword="notebook", min_price=100.0, max_price=5000.0)],
                 keywords=["notebook"],
                 logs_dir=Path(tmp),
@@ -63,6 +104,7 @@ def test_handler_simule_dummy_login_alert() -> None:
                     reason="matched keywords: notebook",
                     price=999.0,
                     price_ok=True,
+                    product_keyword="notebook",
                 )
             ]
 
@@ -75,6 +117,96 @@ def test_handler_simule_dummy_login_alert() -> None:
             assert link_preview is False
             assert "SAVE10" in message
             assert "Oferta Notebook" in message
-            assert (Path(tmp) / "alerts.jsonl").exists()
+            findings = get_findings(db_path=Path(tmp) / "findings.sqlite3")
+            assert len(findings) == 1
+            assert findings[0]["product_keyword"] == "notebook"
+            assert findings[0]["source_group"] == "Dummy Login Test Group"
 
     asyncio.run(run_case())
+
+
+def test_api_state_products_and_chat_groups(tmp_path, monkeypatch) -> None:
+    data_file = tmp_path / "data.json"
+    findings_db = tmp_path / "findings.sqlite3"
+    legacy_file = tmp_path / "alerts.jsonl"
+    monkeypatch.setattr(dashboard_app, "DATA_FILE", data_file)
+    monkeypatch.setattr(dashboard_app, "FINDINGS_DB_FILE", findings_db)
+    monkeypatch.setattr(dashboard_app, "LEGACY_ALERTS_FILE", legacy_file)
+    dashboard_app.save_data(
+        {
+            "products": [{"keyword": "iphone", "min_price": 50.0, "max_price": 200.0}],
+            "chat_groups": "all",
+        }
+    )
+    add_finding(
+        timestamp="2026-04-26T12:00:00+00:00",
+        product_keyword="iphone",
+        url="https://example.com/oferta",
+        price_found=150.0,
+        price_ok=True,
+        source_group="Grupo Teste",
+        db_path=findings_db,
+    )
+
+    with TestClient(dashboard_app.app) as client:
+        state = client.get("/api/state").json()
+        assert state["products"][0]["id"] == 0
+        assert state["products"][0]["keyword"] == "iphone"
+        assert state["chat_groups"] == "all"
+        assert state["findings"][0]["source_group"] == "Grupo Teste"
+
+        created = client.post(
+            "/api/products",
+            json={"keyword": "notebook", "min_price": 1000, "max_price": 4000},
+        )
+        assert created.status_code == 201
+        product_id = created.json()["id"]
+
+        updated = client.put(
+            f"/api/products/{product_id}",
+            json={"keyword": "notebook gamer", "min_price": 1500, "max_price": 5000},
+        )
+        assert updated.status_code == 200
+        assert updated.json()["keyword"] == "notebook gamer"
+
+        groups = client.put("/api/chat-groups", json={"chat_groups": "grupo-a\ngrupo-b"})
+        assert groups.status_code == 200
+        assert groups.json()["chat_groups"] == ["grupo-a", "grupo-b"]
+
+        deleted = client.delete(f"/api/products/{product_id}")
+        assert deleted.status_code == 204
+
+
+def test_api_findings_pagination(tmp_path, monkeypatch) -> None:
+    data_file = tmp_path / "data.json"
+    findings_db = tmp_path / "findings.sqlite3"
+    monkeypatch.setattr(dashboard_app, "DATA_FILE", data_file)
+    monkeypatch.setattr(dashboard_app, "FINDINGS_DB_FILE", findings_db)
+    monkeypatch.setattr(dashboard_app, "LEGACY_ALERTS_FILE", tmp_path / "alerts.jsonl")
+    dashboard_app.save_data(
+        {
+            "products": [{"keyword": "iphone", "min_price": 50.0, "max_price": 200.0}],
+            "chat_groups": "all",
+        }
+    )
+    for index in range(3):
+        add_finding(
+            timestamp=f"2026-04-26T12:0{index}:00+00:00",
+            product_keyword="iphone",
+            url=f"https://example.com/{index}",
+            price_found=100.0 + index,
+            price_ok=True,
+            source_group="Grupo Teste",
+            db_path=findings_db,
+        )
+
+    with TestClient(dashboard_app.app) as client:
+        response = client.get("/api/findings?limit=2&offset=1")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["limit"] == 2
+        assert payload["offset"] == 1
+        assert [finding["url"] for finding in payload["findings"]] == [
+            "https://example.com/1",
+            "https://example.com/0",
+        ]

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import json
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -44,6 +45,10 @@ DEFAULT_DATA = {
 }
 
 
+def _default_data() -> dict[str, Any]:
+    return deepcopy(DEFAULT_DATA)
+
+
 def _atomic_save_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_suffix(path.suffix + ".tmp")
@@ -55,8 +60,9 @@ def _atomic_save_json(path: Path, payload: dict[str, Any]) -> None:
 
 def _load_data(path: Path = DATA_FILE) -> dict[str, Any]:
     if not path.exists():
-        _atomic_save_json(path, DEFAULT_DATA)
-        return dict(DEFAULT_DATA)
+        data = _default_data()
+        _atomic_save_json(path, data)
+        return data
     with path.open("r", encoding="utf-8") as file:
         data = json.load(file)
     if not isinstance(data, dict):
@@ -96,7 +102,8 @@ def _parse_chat_groups(raw: Any) -> str | list[str]:
         parsed = _split_csv(raw)
         return "all" if raw.strip().lower() == "all" else parsed
     if isinstance(raw, list):
-        return [str(item).strip() for item in raw if str(item).strip()]
+        parsed = [str(item).strip() for item in raw if str(item).strip()]
+        return parsed or "all"
     return "all"
 
 
