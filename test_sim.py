@@ -30,7 +30,7 @@ class DummyChat:
 
 class DummyClient:
     def __init__(self) -> None:
-        self.sent_messages: list[tuple[int, str, bool]] = []
+        self.sent_messages: list[tuple[int | str, str, bool]] = []
 
     async def send_message(self, user_id: int, text: str, link_preview: bool = False) -> None:
         self.sent_messages.append((user_id, text, link_preview))
@@ -38,6 +38,8 @@ class DummyClient:
 
 class DummyEvent:
     def __init__(self, text: str) -> None:
+        self.id = 99
+        self.out = False
         self.raw_text = text
         self.chat_id = -100123
         self.client = DummyClient()
@@ -60,7 +62,7 @@ def test_parse_price_formats() -> None:
 
 
 def test_check_price_range() -> None:
-    products = [Product(keyword="notebook", min_price=1000.0, max_price=2000.0)]
+    products = [Product(keywords=["notebook"], max_price=2000.0)]
     assert check_price_range("Notebook em oferta por R$ 1.500,00", products) == (1500.0, True)
     assert check_price_range("Notebook em oferta por R$ 2.500,00", products) == (2500.0, False)
     assert check_price_range("Smartphone em oferta por R$ 1.500,00", products) == (1500.0, False)
@@ -85,7 +87,7 @@ def test_load_settings_reads_env_and_bootstraps_data(tmp_path, monkeypatch) -> N
     assert settings.product_keywords == ["notebook", "ssd"]
 
     data = json.loads((tmp_path / "data.json").read_text(encoding="utf-8"))
-    assert [product["keyword"] for product in data["products"]] == ["notebook", "ssd"]
+    assert [product["keywords"] for product in data["products"]] == [["notebook"], ["ssd"]]
     assert data["chat_groups"] == ["grupo-a", "grupo-b"]
 
 
@@ -114,7 +116,7 @@ def test_handler_simule_dummy_login_alert() -> None:
                 phone="+5500000000000",
                 main_user_id=42,
                 chat_groups="all",
-                products=[Product(keyword="notebook", min_price=100.0, max_price=5000.0)],
+                products=[Product(keywords=["notebook"], max_price=5000.0)],
                 keywords=["notebook"],
                 logs_dir=Path(tmp),
             )
@@ -149,7 +151,44 @@ def test_handler_simule_dummy_login_alert() -> None:
     asyncio.run(run_case())
 
 
+def test_handler_does_not_alert_when_only_failed_page_has_price() -> None:
+    async def run_case() -> None:
+        with TemporaryDirectory() as tmp:
+            settings = Settings(
+                api_id=1,
+                api_hash="hash",
+                phone="+5500000000000",
+                main_user_id=42,
+                chat_groups="all",
+                products=[Product(keywords=["notebook"], max_price=5000.0)],
+                keywords=["notebook"],
+                logs_dir=Path(tmp),
+            )
+            event = DummyEvent("Notebook em promo https://example.com/oferta Cupom: SAVE10")
+            failed_page = [
+                VerificationResult(
+                    url="https://example.com/oferta",
+                    ok=False,
+                    status=500,
+                    title="Erro Notebook",
+                    reason="HTTP 500; price R$ 999.00",
+                    price=999.0,
+                    price_ok=True,
+                    product_keyword="notebook",
+                )
+            ]
+
+            with patch("main.verify_links", return_value=failed_page):
+                await build_handler(settings)(event)
+
+            assert event.client.sent_messages == []
+            assert get_findings(db_path=Path(tmp) / "findings.sqlite3") == []
+
+    asyncio.run(run_case())
+
+
 def test_api_state_products_and_chat_groups(tmp_path, monkeypatch) -> None:
+    monkeypatch.delenv("DASHBOARD_API_KEY", raising=False)
     data_file = tmp_path / "data.json"
     findings_db = tmp_path / "findings.sqlite3"
     legacy_file = tmp_path / "alerts.jsonl"
@@ -157,10 +196,10 @@ def test_api_state_products_and_chat_groups(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(dashboard_app, "FINDINGS_DB_FILE", findings_db)
     monkeypatch.setattr(dashboard_app, "LEGACY_ALERTS_FILE", legacy_file)
     dashboard_app.save_data(
-        {
-            "products": [{"keyword": "iphone", "min_price": 50.0, "max_price": 200.0}],
-            "chat_groups": "all",
-        }
+            {
+                "products": [{"keywords": ["iphone"], "max_price": 200.0}],
+                "chat_groups": "all",
+            }
     )
     add_finding(
         timestamp="2026-04-26T12:00:00+00:00",
@@ -175,23 +214,24 @@ def test_api_state_products_and_chat_groups(tmp_path, monkeypatch) -> None:
     with TestClient(dashboard_app.app) as client:
         state = client.get("/api/state").json()
         assert state["products"][0]["id"] == 0
-        assert state["products"][0]["keyword"] == "iphone"
+        assert state["products"][0]["keywords"] == ["iphone"]
         assert state["chat_groups"] == "all"
         assert state["findings"][0]["source_group"] == "Grupo Teste"
+        assert state["findings"][0]["links"] == []
 
         created = client.post(
             "/api/products",
-            json={"keyword": "notebook", "min_price": 1000, "max_price": 4000},
+            json={"keywords": ["notebook"], "max_price": 4000},
         )
         assert created.status_code == 201
         product_id = created.json()["id"]
 
         updated = client.put(
             f"/api/products/{product_id}",
-            json={"keyword": "notebook gamer", "min_price": 1500, "max_price": 5000},
+            json={"keywords": ["notebook gamer", "notebook"], "max_price": 5000},
         )
         assert updated.status_code == 200
-        assert updated.json()["keyword"] == "notebook gamer"
+        assert updated.json()["keywords"] == ["notebook gamer", "notebook"]
 
         groups = client.put("/api/chat-groups", json={"chat_groups": "grupo-a\ngrupo-b"})
         assert groups.status_code == 200
@@ -202,16 +242,17 @@ def test_api_state_products_and_chat_groups(tmp_path, monkeypatch) -> None:
 
 
 def test_api_findings_pagination(tmp_path, monkeypatch) -> None:
+    monkeypatch.delenv("DASHBOARD_API_KEY", raising=False)
     data_file = tmp_path / "data.json"
     findings_db = tmp_path / "findings.sqlite3"
     monkeypatch.setattr(dashboard_app, "DATA_FILE", data_file)
     monkeypatch.setattr(dashboard_app, "FINDINGS_DB_FILE", findings_db)
     monkeypatch.setattr(dashboard_app, "LEGACY_ALERTS_FILE", tmp_path / "alerts.jsonl")
     dashboard_app.save_data(
-        {
-            "products": [{"keyword": "iphone", "min_price": 50.0, "max_price": 200.0}],
-            "chat_groups": "all",
-        }
+            {
+                "products": [{"keywords": ["iphone"], "max_price": 200.0}],
+                "chat_groups": "all",
+            }
     )
     for index in range(3):
         add_finding(
@@ -234,3 +275,18 @@ def test_api_findings_pagination(tmp_path, monkeypatch) -> None:
             "https://example.com/1",
             "https://example.com/0",
         ]
+
+
+def test_api_requires_dashboard_key_when_configured(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("DASHBOARD_API_KEY", "secret-test-key")
+    monkeypatch.setattr(dashboard_app, "DATA_FILE", tmp_path / "data.json")
+    monkeypatch.setattr(dashboard_app, "FINDINGS_DB_FILE", tmp_path / "findings.sqlite3")
+    monkeypatch.setattr(dashboard_app, "LEGACY_ALERTS_FILE", tmp_path / "alerts.jsonl")
+    dashboard_app.save_data({"products": [{"keywords": ["iphone"], "max_price": 200.0}], "chat_groups": "all"})
+
+    with TestClient(dashboard_app.app) as client:
+        unauthorized = client.get("/api/state")
+        assert unauthorized.status_code == 401
+
+        authorized = client.get("/api/state", headers={"Authorization": "Bearer secret-test-key"})
+        assert authorized.status_code == 200

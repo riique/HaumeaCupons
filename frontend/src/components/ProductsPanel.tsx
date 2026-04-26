@@ -1,5 +1,5 @@
 import { Check, Edit3, Plus, Trash2, X } from 'lucide-react'
-import { type FormEvent, useState } from 'react'
+import { type FormEvent, useCallback, useRef, useState } from 'react'
 
 import ConfirmDialog from './ConfirmDialog'
 import type { Product, ProductPayload } from '../types'
@@ -20,166 +20,182 @@ type ProductFormProps = {
   onSubmit: (product: ProductPayload) => void
 }
 
-const emptyProduct: ProductPayload = {
-  keyword: '',
-  min_price: 0,
-  max_price: 0,
-}
+const emptyProduct: ProductPayload = { keywords: [], max_price: 0 }
 
 function formatPrice(value: number) {
-  return new Intl.NumberFormat('pt-BR', {
-    style: 'currency',
-    currency: 'BRL',
-    maximumFractionDigits: 2,
-  }).format(value)
+  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 2 }).format(value)
 }
 
+const inputCls =
+  'w-full rounded-md border border-panel-border bg-panel-bg px-3 py-2.5 text-sm text-txt-primary outline-none transition placeholder:text-txt-muted focus:border-haumea-600 font-mono'
+
+// ── keyword tag input ────────────────────────────────────────────────────────
+function KeywordInput({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: string[]
+  onChange: (next: string[]) => void
+  disabled: boolean
+}) {
+  const [draft, setDraft] = useState('')
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  const commit = useCallback(() => {
+    const trimmed = draft.trim().toLowerCase()
+    if (trimmed && !value.includes(trimmed)) {
+      onChange([...value, trimmed])
+    }
+    setDraft('')
+  }, [draft, value, onChange])
+
+  const handleKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' || e.key === ',' || e.key === ' ') {
+      e.preventDefault()
+      commit()
+    }
+    if (e.key === 'Backspace' && draft === '' && value.length > 0) {
+      onChange(value.slice(0, -1))
+    }
+  }
+
+  const remove = (kw: string) => onChange(value.filter((k) => k !== kw))
+
+  return (
+    <div
+      className="flex min-h-[42px] w-full flex-wrap gap-1.5 rounded-md border border-panel-border bg-panel-bg px-2.5 py-1.5 cursor-text transition focus-within:border-haumea-600"
+      onClick={() => inputRef.current?.focus()}
+    >
+      {value.map((kw) => (
+        <span
+          key={kw}
+          className="inline-flex items-center gap-1 rounded bg-haumea-600/15 px-2 py-0.5 text-xs font-mono text-haumea-300"
+        >
+          {kw}
+          {!disabled && (
+            <button type="button" onClick={() => remove(kw)} className="hover:text-danger transition-colors" tabIndex={-1}>
+              <X className="h-3 w-3" />
+            </button>
+          )}
+        </span>
+      ))}
+      <input
+        ref={inputRef}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={handleKey}
+        onBlur={commit}
+        disabled={disabled}
+        placeholder={value.length === 0 ? 'iphone, celular… (Enter ou vírgula)' : ''}
+        className="min-w-24 flex-1 bg-transparent text-sm text-txt-primary outline-none placeholder:text-txt-muted font-mono"
+      />
+    </div>
+  )
+}
+
+// ── form ─────────────────────────────────────────────────────────────────────
 function ProductForm({ disabled, initialValue = emptyProduct, submitLabel, onCancel, onSubmit }: ProductFormProps) {
-  const [keyword, setKeyword] = useState(initialValue.keyword)
-  const [minPrice, setMinPrice] = useState(String(initialValue.min_price))
+  const [keywords, setKeywords] = useState<string[]>(initialValue.keywords)
   const [maxPrice, setMaxPrice] = useState(String(initialValue.max_price))
   const [error, setError] = useState('')
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    const min = Number(minPrice)
     const max = Number(maxPrice)
-    if (!keyword.trim()) {
-      setError('Informe a palavra-chave.')
-      return
-    }
-    if (!Number.isFinite(min) || !Number.isFinite(max)) {
-      setError('Informe preços válidos.')
-      return
-    }
-    if (min < 0 || max < 0) {
-      setError('Os preços não podem ser negativos.')
-      return
-    }
-    if (max < min) {
-      setError('O preço máximo deve ser maior ou igual ao mínimo.')
-      return
-    }
+    if (keywords.length === 0) { setError('Informe ao menos uma palavra-chave.'); return }
+    if (!Number.isFinite(max) || max < 0) { setError('Informe um preço máximo válido.'); return }
     setError('')
-    onSubmit({
-      keyword: keyword.trim(),
-      min_price: min,
-      max_price: max,
-    })
+    onSubmit({ keywords, max_price: max })
   }
 
   return (
-    <form className="grid gap-4 rounded-lg border border-gray-100 p-5 sm:grid-cols-[1fr_140px_140px_auto]" onSubmit={handleSubmit}>
-      <label className="space-y-2">
-        <span className="text-xs font-light text-slate-400">Palavra-chave</span>
-        <input
-          className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm font-light text-ink outline-none transition focus:border-action"
-          name="keyword"
-          required
-          value={keyword}
-          onChange={(event) => setKeyword(event.target.value)}
-          disabled={disabled}
-        />
+    <form
+      className="grid gap-3 rounded-lg border border-panel-border bg-panel-surface p-4 sm:grid-cols-[1fr_160px_auto]"
+      onSubmit={handleSubmit}
+    >
+      <label className="space-y-1.5">
+        <span className="text-2xs font-medium uppercase tracking-wide text-txt-muted">Palavras-chave</span>
+        <KeywordInput value={keywords} onChange={setKeywords} disabled={disabled} />
       </label>
-      <label className="space-y-2">
-        <span className="text-xs font-light text-slate-400">Preço mínimo</span>
+      <label className="space-y-1.5">
+        <span className="text-2xs font-medium uppercase tracking-wide text-txt-muted">Preço máx (R$)</span>
         <input
-          className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm font-light text-ink outline-none transition focus:border-action"
-          name="min_price"
-          required
-          min="0"
-          step="0.01"
-          type="number"
-          value={minPrice}
-          onChange={(event) => setMinPrice(event.target.value)}
-          disabled={disabled}
-        />
-      </label>
-      <label className="space-y-2">
-        <span className="text-xs font-light text-slate-400">Preço máximo</span>
-        <input
-          className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm font-light text-ink outline-none transition focus:border-action"
+          className={inputCls}
           name="max_price"
           required
           min="0"
           step="0.01"
           type="number"
+          placeholder="500"
           value={maxPrice}
-          onChange={(event) => setMaxPrice(event.target.value)}
+          onChange={(e) => setMaxPrice(e.target.value)}
           disabled={disabled}
         />
       </label>
       <div className="flex items-end gap-2">
         <button
-          className="inline-flex h-11 items-center gap-2 rounded-lg border border-action px-4 text-sm font-light text-action transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
+          className="inline-flex h-[42px] items-center gap-2 rounded-md bg-haumea-600 px-4 text-sm font-medium text-white transition hover:bg-haumea-500 disabled:opacity-40"
           type="submit"
           disabled={disabled}
         >
-          <Check className="h-4 w-4" aria-hidden="true" />
+          <Check className="h-4 w-4" />
           {submitLabel}
         </button>
-        {onCancel ? (
+        {onCancel && (
           <button
-            className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-gray-200 text-slate-400 transition hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex h-[42px] w-[42px] items-center justify-center rounded-md border border-panel-border text-txt-muted transition hover:text-txt-primary hover:border-panel-hover disabled:opacity-40"
             type="button"
             onClick={onCancel}
             disabled={disabled}
-            aria-label="Cancelar"
             title="Cancelar"
           >
-            <X className="h-4 w-4" aria-hidden="true" />
+            <X className="h-4 w-4" />
           </button>
-        ) : null}
+        )}
       </div>
-      {error ? <p className="text-sm text-red-600 sm:col-span-4">{error}</p> : null}
+      {error && <p className="text-sm text-danger sm:col-span-3">{error}</p>}
     </form>
   )
 }
 
+// ── panel ─────────────────────────────────────────────────────────────────────
 function ProductsPanel({ products, disabled, onAdd, onDelete, onEdit }: ProductsPanelProps) {
   const [isAdding, setIsAdding] = useState(false)
   const [editingId, setEditingId] = useState<number | null>(null)
   const [pendingDelete, setPendingDelete] = useState<Product | null>(null)
 
-  const handleAdd = (product: ProductPayload) => {
-    onAdd(product)
-    setIsAdding(false)
-  }
-
-  const handleEdit = (id: number, product: ProductPayload) => {
-    onEdit(id, product)
-    setEditingId(null)
-  }
+  const handleAdd = (p: ProductPayload) => { onAdd(p); setIsAdding(false) }
+  const handleEdit = (id: number, p: ProductPayload) => { onEdit(id, p); setEditingId(null) }
 
   return (
-    <section className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+    <section className="space-y-5">
+      <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-light text-ink">Produtos</h2>
-          <p className="mt-1 text-sm font-light text-slate-400">Produtos monitorados pelo bot.</p>
+          <h2 className="text-lg font-semibold text-txt-primary tracking-tight">Produtos</h2>
+          <p className="mt-1 text-sm text-txt-muted">
+            Palavras-chave e preço máximo monitorados pelo bot.
+          </p>
         </div>
         <button
-          className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-gray-200 px-4 text-sm font-light text-action transition hover:border-action disabled:cursor-not-allowed disabled:opacity-50"
+          className="inline-flex h-9 items-center gap-2 rounded-md border border-panel-border px-3.5 text-sm text-txt-secondary transition hover:border-haumea-600 hover:text-haumea-400 disabled:opacity-40"
           type="button"
-          onClick={() => {
-            setIsAdding((current) => !current)
-            setEditingId(null)
-          }}
+          onClick={() => { setIsAdding((c) => !c); setEditingId(null) }}
           disabled={disabled}
         >
-          <Plus className="h-4 w-4" aria-hidden="true" />
+          <Plus className="h-3.5 w-3.5" />
           Adicionar
         </button>
       </div>
 
-      {isAdding ? (
+      {isAdding && (
         <ProductForm disabled={disabled} submitLabel="Adicionar" onCancel={() => setIsAdding(false)} onSubmit={handleAdd} />
-      ) : null}
+      )}
 
-      <div className="space-y-3">
+      <div className="space-y-2">
         {products.length === 0 ? (
-          <p className="rounded-lg border border-gray-100 px-5 py-6 text-sm font-light text-slate-400">
-            Nenhum produto cadastrado
+          <p className="rounded-lg border border-panel-border bg-panel-surface px-5 py-6 text-sm text-txt-muted">
+            Nenhum produto cadastrado.
           </p>
         ) : (
           products.map((product) =>
@@ -190,42 +206,46 @@ function ProductsPanel({ products, disabled, onAdd, onDelete, onEdit }: Products
                 initialValue={product}
                 submitLabel="Salvar"
                 onCancel={() => setEditingId(null)}
-                onSubmit={(nextProduct) => handleEdit(product.id, nextProduct)}
+                onSubmit={(p) => handleEdit(product.id, p)}
               />
             ) : (
               <div
-                className="flex flex-col gap-4 rounded-lg border border-gray-100 px-5 py-5 shadow-sm sm:flex-row sm:items-center sm:justify-between"
+                className="flex items-center justify-between rounded-lg border border-panel-border bg-panel-surface px-4 py-3.5 transition-colors hover:border-panel-hover"
                 key={product.id}
               >
-                <div className="min-w-0">
-                  <p className="truncate text-base font-light text-ink">{product.keyword}</p>
-                  <p className="mt-1 text-sm font-light text-slate-400">
-                    {formatPrice(product.min_price)} → {formatPrice(product.max_price)}
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap gap-1.5">
+                    {product.keywords.map((kw) => (
+                      <span
+                        key={kw}
+                        className="inline-flex items-center rounded bg-haumea-600/10 px-2 py-0.5 text-xs font-mono text-haumea-300"
+                      >
+                        {kw}
+                      </span>
+                    ))}
+                  </div>
+                  <p className="mt-1.5 text-2xs text-txt-muted font-mono">
+                    até {formatPrice(product.max_price)}
                   </p>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5 ml-4">
                   <button
-                    className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-gray-100 text-slate-400 transition hover:border-gray-200 hover:text-action disabled:cursor-not-allowed disabled:opacity-50"
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-md text-txt-muted transition hover:bg-panel-hover hover:text-txt-primary disabled:opacity-40"
                     type="button"
-                    onClick={() => {
-                      setEditingId(product.id)
-                      setIsAdding(false)
-                    }}
+                    onClick={() => { setEditingId(product.id); setIsAdding(false) }}
                     disabled={disabled}
-                    aria-label={`Editar ${product.keyword}`}
                     title="Editar"
                   >
-                    <Edit3 className="h-4 w-4" aria-hidden="true" />
+                    <Edit3 className="h-3.5 w-3.5" />
                   </button>
                   <button
-                    className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-gray-100 text-slate-400 transition hover:border-gray-200 hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-md text-txt-muted transition hover:bg-panel-hover hover:text-danger disabled:opacity-40"
                     type="button"
                     onClick={() => setPendingDelete(product)}
                     disabled={disabled}
-                    aria-label={`Excluir ${product.keyword}`}
                     title="Excluir"
                   >
-                    <Trash2 className="h-4 w-4" aria-hidden="true" />
+                    <Trash2 className="h-3.5 w-3.5" />
                   </button>
                 </div>
               </div>
@@ -233,18 +253,16 @@ function ProductsPanel({ products, disabled, onAdd, onDelete, onEdit }: Products
           )
         )}
       </div>
-      {pendingDelete ? (
+
+      {pendingDelete && (
         <ConfirmDialog
           title="Excluir produto"
-          message={`Deseja excluir "${pendingDelete.keyword}"?`}
+          message={`Deseja excluir o produto com as palavras-chave "${pendingDelete.keywords.join(', ')}"?`}
           disabled={disabled}
           onCancel={() => setPendingDelete(null)}
-          onConfirm={() => {
-            onDelete(pendingDelete.id)
-            setPendingDelete(null)
-          }}
+          onConfirm={() => { onDelete(pendingDelete.id); setPendingDelete(null) }}
         />
-      ) : null}
+      )}
     </section>
   )
 }

@@ -1,7 +1,6 @@
 export type Product = {
   id: number
-  keyword: string
-  min_price: number
+  keywords: string[]
   max_price: number
 }
 
@@ -17,6 +16,8 @@ export type Finding = {
   price_found: number | null
   price_ok: boolean
   source_group: string
+  coupons: string[]
+  links: string[]
 }
 
 export type ApiState = {
@@ -30,3 +31,5 @@ export type FindingsPage = {
   limit: number
   offset: number
 }
+
+export type Tab = 'overview' | 'products' | 'groups' | 'findings' | 'logs'

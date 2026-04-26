@@ -1,21 +1,19 @@
-import { Check, ExternalLink } from 'lucide-react'
+import { ExternalLink, Trash2 } from 'lucide-react'
+import { useState } from 'react'
 
+import ConfirmDialog from './ConfirmDialog'
 import type { Finding } from '../types'
 
 type FindingsTableProps = {
   findings: Finding[]
+  onDelete?: (id: number) => void
+  onClearAll?: () => void
 }
 
 function formatTimestamp(value?: string) {
-  if (!value) {
-    return '-'
-  }
-
+  if (!value) return '—'
   const date = new Date(value)
-  if (Number.isNaN(date.getTime())) {
-    return value
-  }
-
+  if (Number.isNaN(date.getTime())) return value
   return new Intl.DateTimeFormat('pt-BR', {
     day: '2-digit',
     month: '2-digit',
@@ -26,86 +24,158 @@ function formatTimestamp(value?: string) {
 }
 
 function formatPrice(value: Finding['price_found']) {
-  if (value === null || value === undefined) {
-    return '-'
-  }
-
-  const numeric = Number(value)
-  if (Number.isNaN(numeric)) {
-    return String(value)
-  }
-
-  return new Intl.NumberFormat('pt-BR', {
-    style: 'currency',
-    currency: 'BRL',
-    maximumFractionDigits: 2,
-  }).format(numeric)
+  if (value === null || value === undefined) return '—'
+  const n = Number(value)
+  if (Number.isNaN(n)) return String(value)
+  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 2 }).format(n)
 }
 
-function FindingsTable({ findings }: FindingsTableProps) {
+function FindingsTable({ findings, onDelete, onClearAll }: FindingsTableProps) {
+  const [pendingDelete, setPendingDelete] = useState<Finding | null>(null)
+  const [pendingClear, setPendingClear] = useState(false)
+
   return (
-    <section className="space-y-6">
-      <div>
-        <h2 className="text-lg font-light text-ink">Últimos Alertas</h2>
-        <p className="mt-1 text-sm font-light text-slate-400">Máximo de 200 registros recentes.</p>
+    <section className="space-y-5">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-semibold text-txt-primary tracking-tight">Alertas</h2>
+          <p className="mt-1 text-sm text-txt-muted">Últimos 200 registros capturados pelo bot.</p>
+        </div>
+        {findings.length > 0 && onClearAll && (
+          <button
+            className="inline-flex h-9 items-center gap-2 rounded-md border border-danger/30 px-3.5 text-sm text-danger transition hover:bg-danger/10 hover:border-danger"
+            type="button"
+            onClick={() => setPendingClear(true)}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            Limpar tudo
+          </button>
+        )}
       </div>
 
       {findings.length === 0 ? (
-        <p className="rounded-lg border border-gray-100 px-5 py-6 text-sm font-light text-slate-400">
-          Nenhum alerta encontrado
+        <p className="rounded-lg border border-panel-border bg-panel-surface px-5 py-6 text-sm text-txt-muted">
+          Nenhum alerta encontrado.
         </p>
       ) : (
-        <div className="max-h-[520px] overflow-auto rounded-lg border border-gray-100 shadow-sm">
-          <table className="min-w-[860px] divide-y divide-gray-100 text-left text-sm">
-            <thead className="sticky top-0 bg-white">
-              <tr className="text-xs font-light uppercase tracking-normal text-slate-400">
-                <th className="px-5 py-4 font-light">Data</th>
-                <th className="px-5 py-4 font-light">Grupo</th>
-                <th className="px-5 py-4 font-light">Produto</th>
-                <th className="px-5 py-4 font-light">Link</th>
-                <th className="px-5 py-4 font-light">Preço</th>
-                <th className="px-5 py-4 font-light">Status</th>
+        <div className="overflow-auto rounded-lg border border-panel-border">
+          <table className="min-w-[800px] w-full text-left text-sm">
+            <thead>
+              <tr className="border-b border-panel-border bg-panel-surface">
+                <th className="px-4 py-3 text-2xs font-semibold uppercase tracking-wide text-txt-muted">Data</th>
+                <th className="px-4 py-3 text-2xs font-semibold uppercase tracking-wide text-txt-muted">Grupo</th>
+                <th className="px-4 py-3 text-2xs font-semibold uppercase tracking-wide text-txt-muted">Produto</th>
+                <th className="px-4 py-3 text-2xs font-semibold uppercase tracking-wide text-txt-muted">Cupons</th>
+                <th className="px-4 py-3 text-2xs font-semibold uppercase tracking-wide text-txt-muted">Link</th>
+                <th className="px-4 py-3 text-2xs font-semibold uppercase tracking-wide text-txt-muted">Preço</th>
+                <th className="px-4 py-3 text-2xs font-semibold uppercase tracking-wide text-txt-muted">Status</th>
+                <th className="w-12 px-4 py-3" />
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100">
-              {findings.map((finding) => (
-                <tr className="align-top text-slate-500" key={finding.id}>
-                  <td className="whitespace-nowrap px-5 py-4 font-light">
-                    {formatTimestamp(finding.timestamp)}
+            <tbody className="divide-y divide-panel-border">
+              {findings.map((f) => (
+                <tr key={f.id} className="transition-colors hover:bg-panel-surface/60">
+                  <td className="whitespace-nowrap px-4 py-3 font-mono text-2xs text-txt-secondary">
+                    {formatTimestamp(f.timestamp)}
                   </td>
-                  <td className="max-w-40 px-5 py-4 font-light">
-                    <span className="line-clamp-2">{finding.source_group || '-'}</span>
+                  <td className="max-w-36 px-4 py-3">
+                    <span className="line-clamp-1 text-sm text-txt-secondary">{f.source_group || '—'}</span>
                   </td>
-                  <td className="max-w-xs px-5 py-4 font-light">
-                    <span className="line-clamp-2">{finding.product_keyword || '-'}</span>
+                  <td className="max-w-xs px-4 py-3">
+                    <span className="line-clamp-1 text-sm text-txt-primary">{f.product_keyword || '—'}</span>
                   </td>
-                  <td className="whitespace-nowrap px-5 py-4 font-light">
-                    {finding.url ? (
+                  <td className="px-4 py-3">
+                    {f.coupons && f.coupons.length > 0 ? (
+                      <div className="flex flex-wrap gap-1">
+                        {f.coupons.map((c) => (
+                          <span key={c} className="rounded bg-amber-500/10 px-1.5 py-0.5 text-2xs font-mono text-amber-400">
+                            {c}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="text-2xs text-txt-muted">—</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3">
+                    {f.links && f.links.length > 0 ? (
+                      <div className="space-y-0.5">
+                        {f.links.map((url, i) => (
+                          <a
+                            key={i}
+                            className="flex items-center gap-1 text-sm text-haumea-400 transition hover:text-haumea-300"
+                            href={url}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            <span className="max-w-48 truncate">{url.replace(/^https?:\/\//, '')}</span>
+                            <ExternalLink className="h-3 w-3 shrink-0" />
+                          </a>
+                        ))}
+                      </div>
+                    ) : f.url ? (
                       <a
-                        className="inline-flex items-center gap-2 text-action transition hover:text-blue-600"
-                        href={finding.url}
+                        className="inline-flex items-center gap-1.5 text-sm text-haumea-400 transition hover:text-haumea-300"
+                        href={f.url}
                         target="_blank"
                         rel="noreferrer"
                       >
-                        URL
-                        <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+                        Abrir
+                        <ExternalLink className="h-3 w-3" />
                       </a>
                     ) : (
-                      '-'
+                      '—'
                     )}
                   </td>
-                  <td className="whitespace-nowrap px-5 py-4 font-light">
-                    <span className="inline-flex items-center gap-2">
-                      {finding.price_ok ? <Check className="h-4 w-4 text-green-500" aria-label="Preço aprovado" /> : null}
-                      {formatPrice(finding.price_found)}
+                  <td className="whitespace-nowrap px-4 py-3 font-mono text-sm text-txt-primary">
+                    {formatPrice(f.price_found)}
+                  </td>
+                  <td className="px-4 py-3">
+                    <span
+                      className={`inline-flex items-center rounded-full px-2 py-0.5 text-2xs font-medium ${
+                        f.price_ok
+                          ? 'bg-haumea-600/10 text-haumea-400'
+                          : 'bg-panel-hover text-txt-muted'
+                      }`}
+                    >
+                      {f.price_ok ? 'Aprovado' : 'Fora da faixa'}
                     </span>
                   </td>
-                  <td className="px-5 py-4 font-light">{finding.price_ok ? 'Aprovado' : 'Fora da faixa'}</td>
+                  <td className="px-4 py-3">
+                    {onDelete && (
+                      <button
+                        className="inline-flex h-7 w-7 items-center justify-center rounded-md text-txt-muted transition hover:bg-panel-hover hover:text-danger"
+                        type="button"
+                        onClick={() => setPendingDelete(f)}
+                        title="Excluir"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+      )}
+
+      {pendingDelete && onDelete && (
+        <ConfirmDialog
+          title="Excluir alerta"
+          message={`Deseja excluir o alerta de "${pendingDelete.product_keyword || 'sem keyword'}"?`}
+          onCancel={() => setPendingDelete(null)}
+          onConfirm={() => { onDelete(pendingDelete.id); setPendingDelete(null) }}
+        />
+      )}
+
+      {pendingClear && onClearAll && (
+        <ConfirmDialog
+          title="Limpar todos os alertas"
+          message={`Tem certeza que deseja excluir todos os ${findings.length} alertas? Esta ação não pode ser desfeita.`}
+          onCancel={() => setPendingClear(false)}
+          onConfirm={() => { onClearAll(); setPendingClear(false) }}
+        />
       )}
     </section>
   )

@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 import json
-from contextlib import asynccontextmanager
+import os
+import re
+import secrets
+import sqlite3
+from collections import deque
+from contextlib import asynccontextmanager, closing
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Query, Response, status
-from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field, field_validator, model_validator
+from fastapi import FastAPI, HTTPException, Query, Request, Response, status
+from fastapi.responses import FileResponse, JSONResponse
+from pydantic import BaseModel, Field, field_validator
 
 from config import DATA_FILE, DEFAULT_DATA, _atomic_save_json
 from storage import DEFAULT_DB_FILE, LEGACY_ALERTS_FILE, get_findings, init_findings_db, migrate_alerts_jsonl
@@ -19,23 +24,18 @@ FINDINGS_DB_FILE = DEFAULT_DB_FILE
 
 
 class ProductPayload(BaseModel):
-    keyword: str = Field(min_length=1, max_length=80)
-    min_price: float = Field(ge=0)
+    keywords: list[str] = Field(min_length=1, max_length=20)
     max_price: float = Field(ge=0)
 
-    @field_validator("keyword")
+    @field_validator("keywords")
     @classmethod
-    def normalize_keyword(cls, value: str) -> str:
-        keyword = value.strip()
-        if not keyword:
-            raise ValueError("Informe a palavra-chave")
-        return keyword
-
-    @model_validator(mode="after")
-    def validate_range(self) -> "ProductPayload":
-        if self.max_price < self.min_price:
-            raise ValueError("O preço máximo deve ser maior ou igual ao mínimo")
-        return self
+    def normalize_keywords(cls, value: list[str]) -> list[str]:
+        cleaned = [k.strip().lower() for k in value if k.strip()]
+        if not cleaned:
+            raise ValueError("Informe ao menos uma palavra-chave")
+        if any(len(keyword) > 80 for keyword in cleaned):
+            raise ValueError("Cada palavra-chave deve ter no maximo 80 caracteres")
+        return list(dict.fromkeys(cleaned))  # dedupe, preserve order
 
 
 class ProductResponse(ProductPayload):
@@ -63,6 +63,8 @@ class FindingResponse(BaseModel):
     price_found: float | None
     price_ok: bool
     source_group: str
+    coupons: list[str] = Field(default_factory=list)
+    links: list[str] = Field(default_factory=list)
 
 
 class StateResponse(BaseModel):
@@ -87,6 +89,30 @@ async def lifespan(_: FastAPI):
 app = FastAPI(title="HaumeaCupons Dashboard", lifespan=lifespan)
 
 
+@app.middleware("http")
+async def require_dashboard_api_key(request: Request, call_next):
+    if not request.url.path.startswith("/api/"):
+        return await call_next(request)
+
+    expected_key = os.getenv("DASHBOARD_API_KEY", "").strip()
+    if not expected_key:
+        return await call_next(request)
+
+    provided_key = request.headers.get("x-dashboard-key", "").strip()
+    authorization = request.headers.get("authorization", "").strip()
+    if authorization.lower().startswith("bearer "):
+        provided_key = authorization[7:].strip()
+
+    if not provided_key or not secrets.compare_digest(provided_key, expected_key):
+        return JSONResponse(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            content={"detail": "Chave do dashboard obrigatoria"},
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    return await call_next(request)
+
+
 def load_data() -> dict[str, Any]:
     if not DATA_FILE.exists():
         save_data({"products": list(DEFAULT_DATA["products"]), "chat_groups": DEFAULT_DATA["chat_groups"]})
@@ -97,6 +123,10 @@ def load_data() -> dict[str, Any]:
     if not isinstance(data.get("products"), list):
         data["products"] = list(DEFAULT_DATA["products"])
     data["chat_groups"] = parse_groups(data.get("chat_groups", DEFAULT_DATA["chat_groups"]))
+    products, changed = _normalize_products_for_storage(data.get("products", []))
+    if changed:
+        data["products"] = products
+        save_data(data)
     return data
 
 
@@ -134,13 +164,40 @@ def _next_product_id(products: list[dict[str, Any]]) -> int:
 
 
 def _product_response(product: dict[str, Any], fallback: int) -> ProductResponse:
-    payload = ProductPayload.model_validate(product)
+    # Migrate legacy single-keyword format
+    normalized = dict(product)
+    if "keyword" in normalized and "keywords" not in normalized:
+        normalized["keywords"] = [normalized.pop("keyword")]
+    if "min_price" in normalized:
+        normalized.pop("min_price", None)
+    payload = ProductPayload.model_validate(normalized)
     return ProductResponse(
         id=_product_id(product, fallback),
-        keyword=payload.keyword,
-        min_price=payload.min_price,
+        keywords=payload.keywords,
         max_price=payload.max_price,
     )
+
+
+def _normalize_products_for_storage(raw_products: Any) -> tuple[list[dict[str, Any]], bool]:
+    if not isinstance(raw_products, list):
+        return list(DEFAULT_DATA["products"]), True
+
+    normalized: list[dict[str, Any]] = []
+    for index, product in enumerate(raw_products):
+        if not isinstance(product, dict):
+            continue
+        response = _product_response(product, index)
+        normalized.append(
+            {
+                "id": response.id,
+                "keywords": response.keywords,
+                "max_price": response.max_price,
+            }
+        )
+
+    if not normalized:
+        return list(DEFAULT_DATA["products"]), True
+    return normalized, normalized != raw_products
 
 
 def _product_index(products: list[dict[str, Any]], product_id: int) -> int:
@@ -185,8 +242,7 @@ async def create_product(payload: ProductPayload) -> ProductResponse:
     products = [product for product in data.get("products", []) if isinstance(product, dict)]
     product = {
         "id": _next_product_id(products),
-        "keyword": payload.keyword,
-        "min_price": payload.min_price,
+        "keywords": payload.keywords,
         "max_price": payload.max_price,
     }
     products.append(product)
@@ -202,8 +258,7 @@ async def update_product(product_id: int, payload: ProductPayload) -> ProductRes
     index = _product_index(products, product_id)
     product = {
         "id": product_id,
-        "keyword": payload.keyword,
-        "min_price": payload.min_price,
+        "keywords": payload.keywords,
         "max_price": payload.max_price,
     }
     products[index] = product
@@ -229,6 +284,44 @@ async def update_chat_groups(payload: ChatGroupsPayload) -> ChatGroupsResponse:
     data["chat_groups"] = payload.chat_groups
     save_data(data)
     return ChatGroupsResponse(chat_groups=payload.chat_groups)
+
+@app.delete("/api/findings/{finding_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_finding(finding_id: int) -> Response:
+    with closing(sqlite3.connect(FINDINGS_DB_FILE)) as conn:
+        cursor = conn.execute("DELETE FROM findings WHERE id = ?", (finding_id,))
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Alerta não encontrado")
+        conn.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@app.delete("/api/findings", status_code=status.HTTP_204_NO_CONTENT)
+async def clear_findings() -> Response:
+    with closing(sqlite3.connect(FINDINGS_DB_FILE)) as conn:
+        conn.execute("DELETE FROM findings")
+        conn.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+def _redact_log_line(line: str) -> str:
+    redacted = re.sub(r"user_id=\d+", "user_id=REDACTED", line, flags=re.IGNORECASE)
+    redacted = re.sub(r"MAIN_USER_ID=\d+", "MAIN_USER_ID=REDACTED", redacted, flags=re.IGNORECASE)
+    redacted = re.sub(r"https?://\S+", "URL_REDACTED", redacted)
+    return redacted
+
+
+@app.get("/api/logs")
+async def get_logs(lines: int = Query(200, ge=1, le=1000)) -> dict[str, list[str]]:
+    log_file = Path("logs/haumea_cupons.log")
+    if not log_file.exists():
+        return {"logs": ["Nenhum log encontrado. O bot já foi iniciado?"]}
+    
+    try:
+        with open(log_file, "r", encoding="utf-8") as f:
+            tail = deque(f, maxlen=lines)
+            return {"logs": [_redact_log_line(line.rstrip("\n")) for line in tail]}
+    except Exception as e:
+        return {"logs": [f"Erro ao ler arquivo de log: {e}"]}
 
 
 @app.get("/", include_in_schema=False)

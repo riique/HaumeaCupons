@@ -11,7 +11,8 @@ from urllib.parse import urljoin, urlsplit
 
 LINK_RE = re.compile(r"https?://[^\s<>)\"']+", re.IGNORECASE)
 PRICE_RE = re.compile(
-    r"(?:R\$\s*|BRL\s*)(?P<prefix>[0-9][0-9.,\s]*)|(?P<suffix>[0-9][0-9.,\s]*)\s*(?:reais|R\$)",
+    r"(?:R\$\s*|BRL\s*|\bPOR\s*:?\s*)(?P<prefix>[0-9][0-9.,\s]*)"
+    r"|(?P<suffix>[0-9][0-9.,\s]*)\s*(?:reais|R\$)",
     re.IGNORECASE,
 )
 COUPON_RE = re.compile(
@@ -24,8 +25,7 @@ MAX_CONCURRENT_VERIFICATIONS = 5
 
 
 class ProductLike(Protocol):
-    keyword: str
-    min_price: float
+    keywords: list[str]
     max_price: float
 
 
@@ -112,12 +112,13 @@ def match_price_range(text: str, products: Iterable[ProductLike]) -> tuple[float
     first_price = prices[0] if prices else None
     lowered = (text or "").lower()
     for product in products:
-        keyword = product.keyword.lower()
-        if keyword and keyword not in lowered:
+        # Match if ANY keyword is found in the text
+        matched_kw = next((kw for kw in product.keywords if kw.lower() in lowered), None)
+        if not matched_kw:
             continue
         for price in prices:
-            if product.min_price <= price <= product.max_price:
-                return price, True, product.keyword
+            if price <= product.max_price:
+                return price, True, matched_kw
     return first_price, False, ""
 
 
@@ -250,7 +251,7 @@ async def verify_link(
 
     product_list = list(products)
     lower_text = page_text.lower()
-    matched_keywords = [product.keyword for product in product_list if product.keyword.lower() in lower_text]
+    matched_keywords = [kw for product in product_list for kw in product.keywords if kw.lower() in lower_text]
     price, price_ok, product_keyword = match_price_range(page_text, product_list)
     status_ok = response_status is not None and 200 <= response_status < 400
     ok = status_ok and bool(matched_keywords or title or page_text)

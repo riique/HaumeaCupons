@@ -14,24 +14,59 @@ def _split_csv(value: str) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
+def _env_bool(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _env_int(name: str, default: int) -> int:
+    value = os.getenv(name, "").strip()
+    if not value:
+        return default
+    try:
+        return int(value)
+    except ValueError as exc:
+        raise RuntimeError(f"{name} must be an integer") from exc
+
+
+def _env_float(name: str, default: float) -> float:
+    value = os.getenv(name, "").strip()
+    if not value:
+        return default
+    try:
+        return float(value)
+    except ValueError as exc:
+        raise RuntimeError(f"{name} must be a number") from exc
+
+
 @dataclass(frozen=True)
 class Product:
-    keyword: str
-    min_price: float
+    keywords: list[str]
     max_price: float
+
+    @property
+    def primary_keyword(self) -> str:
+        return self.keywords[0] if self.keywords else ""
 
 
 @dataclass(frozen=True)
 class Settings:
     api_id: int
     api_hash: str
-    phone: str
     main_user_id: int
     chat_groups: str | list[str]
     products: list[Product]
     keywords: list[str]
+    bot_token: str = ""
+    phone: str = ""
     session_name: str = "haumea_cupons"
     logs_dir: Path = Path("logs")
+    allow_all_chats: bool = False
+    alert_min_interval_seconds: float = 1.2
+    max_alert_queue_size: int = 100
+    dedupe_ttl_seconds: int = 1800
 
     @property
     def product_keywords(self) -> list[str]:
@@ -39,10 +74,9 @@ class Settings:
 
 
 DATA_FILE = Path("data.json")
-ENV_PRODUCT_MIN_PRICE = 0.0
 ENV_PRODUCT_MAX_PRICE = 1_000_000.0
 DEFAULT_DATA = {
-    "products": [{"keyword": "iphone", "min_price": 50.0, "max_price": 200.0}],
+    "products": [{"keywords": ["iphone"], "max_price": 200.0}],
     "chat_groups": "all",
 }
 
@@ -60,15 +94,9 @@ def _atomic_save_json(path: Path, payload: dict[str, Any]) -> None:
     tmp_path.replace(path)
 
 
-def _env_products_from_keywords(keywords: list[str]) -> list[dict[str, float | str]]:
-    return [
-        {
-            "keyword": keyword,
-            "min_price": ENV_PRODUCT_MIN_PRICE,
-            "max_price": ENV_PRODUCT_MAX_PRICE,
-        }
-        for keyword in keywords
-    ]
+def _env_products_from_keywords(keywords: list[str]) -> list[dict[str, Any]]:
+    # Seed: one product per keyword from .env, no price cap
+    return [{"keywords": [keyword], "max_price": ENV_PRODUCT_MAX_PRICE} for keyword in keywords]
 
 
 def _initial_data_from_env(chat_groups: str | None, product_keywords: list[str]) -> dict[str, Any]:
@@ -100,17 +128,26 @@ def _parse_products(raw: Any) -> list[Product]:
     for item in raw:
         if not isinstance(item, dict):
             continue
-        keyword = str(item.get("keyword", "")).strip()
-        if not keyword:
+        # Support legacy single-keyword format
+        if "keyword" in item and "keywords" not in item:
+            kws = [str(item["keyword"]).strip().lower()]
+        else:
+            raw_kws = item.get("keywords", [])
+            kws = [
+                str(k).strip().lower()
+                for k in (raw_kws if isinstance(raw_kws, list) else [raw_kws])
+                if str(k).strip()
+            ]
+        kws = list(dict.fromkeys(kws))
+        if not kws:
             continue
         try:
-            min_price = float(item.get("min_price", 0))
             max_price = float(item.get("max_price", 0))
         except (TypeError, ValueError) as exc:
-            raise RuntimeError(f"Invalid price range for product {keyword!r}") from exc
-        if min_price < 0 or max_price < min_price:
-            raise RuntimeError(f"Invalid min/max price for product {keyword!r}")
-        products.append(Product(keyword=keyword, min_price=min_price, max_price=max_price))
+            raise RuntimeError(f"Invalid max_price for product {kws!r}") from exc
+        if max_price < 0:
+            raise RuntimeError(f"max_price must be >= 0 for product {kws!r}")
+        products.append(Product(keywords=kws, max_price=max_price))
 
     if not products:
         products = [Product(**DEFAULT_DATA["products"][0])]
@@ -135,44 +172,49 @@ def load_settings() -> Settings:
     product_keywords_env = _split_csv(os.getenv("PRODUCTS_KEYWORDS", ""))
     data = _load_data(initial_data=_initial_data_from_env(chat_groups_env, product_keywords_env))
 
-    required = {
-        "API_ID": os.getenv("API_ID"),
-        "API_HASH": os.getenv("API_HASH"),
-        "PHONE": os.getenv("PHONE"),
-        "MAIN_USER_ID": os.getenv("MAIN_USER_ID"),
-    }
-    missing = [key for key, value in required.items() if not value]
-    if missing:
-        raise RuntimeError(f"Missing required env vars: {', '.join(missing)}")
+    api_id_raw = os.getenv("API_ID", "")
+    api_hash = os.getenv("API_HASH", "")
+    bot_token = os.getenv("BOT_TOKEN", "")
+    phone = os.getenv("PHONE", "")
+    main_user_id_raw = os.getenv("MAIN_USER_ID", "")
+
+    if not api_id_raw or not api_hash:
+        raise RuntimeError("Missing required env vars: API_ID, API_HASH")
+    if not bot_token and not phone:
+        raise RuntimeError("Set BOT_TOKEN (recommended) or PHONE in .env")
+    if not main_user_id_raw:
+        raise RuntimeError("Missing required env var: MAIN_USER_ID")
 
     try:
-        api_id = int(required["API_ID"] or "")
-        main_user_id = int(required["MAIN_USER_ID"] or "")
+        api_id = int(api_id_raw)
+        main_user_id = int(main_user_id_raw)
     except ValueError as exc:
         raise RuntimeError("API_ID and MAIN_USER_ID must be integers") from exc
 
     products_raw = data.get("products")
-    if products_raw is None and product_keywords_env:
-        products_raw = _env_products_from_keywords(product_keywords_env)
     products = _parse_products(products_raw or DEFAULT_DATA["products"])
 
     chat_groups_raw = data.get("chat_groups")
     if chat_groups_raw is None and chat_groups_env:
         chat_groups_raw = chat_groups_env
     chat_groups = _parse_chat_groups(chat_groups_raw if chat_groups_raw is not None else DEFAULT_DATA["chat_groups"])
-    keywords = list(
-        dict.fromkeys(
-            [product.keyword.lower() for product in products]
-            + [keyword.lower() for keyword in product_keywords_env]
-        )
-    )
+    keywords = list(dict.fromkeys(kw.lower() for product in products for kw in product.keywords))
+    allow_all_chats = _env_bool("ALLOW_ALL_CHATS", False)
+    alert_min_interval_seconds = max(1.0, _env_float("ALERT_MIN_INTERVAL_SECONDS", 1.2))
+    max_alert_queue_size = max(1, _env_int("MAX_ALERT_QUEUE_SIZE", 100))
+    dedupe_ttl_seconds = max(60, _env_int("DEDUPE_TTL_SECONDS", 1800))
 
     return Settings(
         api_id=api_id,
-        api_hash=required["API_HASH"] or "",
-        phone=required["PHONE"] or "",
+        api_hash=api_hash,
+        bot_token=bot_token,
+        phone=phone,
         main_user_id=main_user_id,
         chat_groups=chat_groups,
         products=products,
         keywords=keywords,
+        allow_all_chats=allow_all_chats,
+        alert_min_interval_seconds=alert_min_interval_seconds,
+        max_alert_queue_size=max_alert_queue_size,
+        dedupe_ttl_seconds=dedupe_ttl_seconds,
     )

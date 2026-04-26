@@ -1,9 +1,47 @@
 {
   "products": [
     {
-      "keyword": "iphone",
-      "min_price": 50.0,
-      "max_price": 200.0
+      "id": 0,
+      "keywords": [
+        "celular"
+      ],
+      "max_price": 10000.0
+    },
+    {
+      "id": 1,
+      "keywords": [
+        "iphone"
+      ],
+      "max_price": 10000.0
+    },
+    {
+      "id": 2,
+      "keywords": [
+        "samsung",
+        "samsumg"
+      ],
+      "max_price": 10000.0
+    },
+    {
+      "id": 3,
+      "keywords": [
+        "whey"
+      ],
+      "max_price": 100000.0
+    },
+    {
+      "id": 4,
+      "keywords": [
+        "gabinete"
+      ],
+      "max_price": 1231231.0
+    },
+    {
+      "id": 5,
+      "keywords": [
+        "monitor"
+      ],
+      "max_price": 12312.0
     }
   ],
   "chat_groups": "all"

@@ -2,10 +2,12 @@ import { useCallback, useEffect, useState } from 'react'
 
 import ChatGroupsPanel from './components/ChatGroupsPanel'
 import FindingsTable from './components/FindingsTable'
-import Footer from './components/Footer'
-import Header from './components/Header'
+import LogsPanel from './components/LogsPanel'
+import Overview from './components/Overview'
 import ProductsPanel from './components/ProductsPanel'
-import type { ApiState, FindingsPage, Product, ProductPayload } from './types'
+import Sidebar from './components/Sidebar'
+import { jsonRequest, requestJson } from './api'
+import type { ApiState, FindingsPage, Product, ProductPayload, Tab } from './types'
 
 const emptyState: ApiState = {
   products: [],
@@ -17,43 +19,15 @@ function groupsToText(chatGroups: ApiState['chat_groups']) {
   return Array.isArray(chatGroups) ? chatGroups.join('\n') : chatGroups
 }
 
-async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, init)
-  if (!response.ok) {
-    let message = 'A API retornou erro.'
-    try {
-      const payload = (await response.json()) as { detail?: string | { msg?: string }[] }
-      if (typeof payload.detail === 'string') {
-        message = payload.detail
-      } else if (Array.isArray(payload.detail) && payload.detail[0]?.msg) {
-        message = payload.detail[0].msg
-      }
-    } catch {
-      message = response.statusText || message
-    }
-    throw new Error(message)
-  }
-  if (response.status === 204) {
-    return undefined as T
-  }
-  return response.json() as Promise<T>
-}
-
-function jsonRequest(method: string, body?: unknown): RequestInit {
-  return {
-    method,
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  }
-}
-
 function LoadingState() {
   return (
-    <div className="flex items-center justify-center gap-3 py-20 text-sm font-light text-slate-500">
-      <span className="h-5 w-5 animate-spin rounded-full border-2 border-gray-200 border-t-action" aria-hidden="true" />
-      Carregando dados...
+    <div className="flex flex-col items-center justify-center gap-4 py-32">
+      <span
+        className="h-8 w-8 animate-spin rounded-full border-2 border-panel-border border-t-haumea-500"
+        aria-hidden="true"
+      />
+      <p className="text-sm text-txt-muted">Carregando dados...</p>
+      <p className="text-2xs text-txt-muted">Verifique se o backend está rodando na porta 8000</p>
     </div>
   )
 }
@@ -63,14 +37,13 @@ function App() {
   const [isLoading, setIsLoading] = useState(true)
   const [isMutating, setIsMutating] = useState(false)
   const [error, setError] = useState('')
+  const [tab, setTab] = useState<Tab>('overview')
 
   const loadState = useCallback(async (showLoading = false) => {
-    if (showLoading) {
-      setIsLoading(true)
-    }
+    if (showLoading) setIsLoading(true)
     try {
-      const nextState = await requestJson<ApiState>('/api/state')
-      setState(nextState)
+      const next = await requestJson<ApiState>('/api/state')
+      setState(next)
       setError('')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Falha ao carregar dados.')
@@ -82,7 +55,7 @@ function App() {
   const refreshFindings = useCallback(async () => {
     try {
       const page = await requestJson<FindingsPage>('/api/findings?limit=200')
-      setState((current) => ({ ...current, findings: page.findings }))
+      setState((c) => ({ ...c, findings: page.findings }))
       setError('')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Falha ao atualizar alertas.')
@@ -90,10 +63,10 @@ function App() {
   }, [])
 
   const mutate = useCallback(
-    async (operation: () => Promise<unknown>) => {
+    async (op: () => Promise<unknown>) => {
       setIsMutating(true)
       try {
-        await operation()
+        await op()
         await loadState()
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Falha ao salvar alteração.')
@@ -109,50 +82,88 @@ function App() {
   }, [loadState])
 
   useEffect(() => {
-    const interval = window.setInterval(() => {
-      void refreshFindings()
-    }, 30_000)
-    return () => window.clearInterval(interval)
+    const id = window.setInterval(() => void refreshFindings(), 30_000)
+    return () => window.clearInterval(id)
   }, [refreshFindings])
 
-  const addProduct = (product: ProductPayload) =>
-    mutate(() => requestJson<Product>('/api/products', jsonRequest('POST', product)))
-  const editProduct = (id: number, product: ProductPayload) =>
-    mutate(() => requestJson<Product>(`/api/products/${id}`, jsonRequest('PUT', product)))
-  const deleteProduct = (id: number) => mutate(() => requestJson<void>(`/api/products/${id}`, { method: 'DELETE' }))
-  const saveChatGroups = (chatGroups: string) =>
-    mutate(() => requestJson('/api/chat-groups', jsonRequest('PUT', { chat_groups: chatGroups })))
+  const addProduct = (p: ProductPayload) =>
+    mutate(() => requestJson<Product>('/api/products', jsonRequest('POST', p)))
+  const editProduct = (id: number, p: ProductPayload) =>
+    mutate(() => requestJson<Product>(`/api/products/${id}`, jsonRequest('PUT', p)))
+  const deleteProduct = (id: number) =>
+    mutate(() => requestJson<void>(`/api/products/${id}`, { method: 'DELETE' }))
+  const saveChatGroups = (g: string) =>
+    mutate(() => requestJson('/api/chat-groups', jsonRequest('PUT', { chat_groups: g })))
+  const deleteFinding = (id: number) =>
+    mutate(() => requestJson<void>(`/api/findings/${id}`, { method: 'DELETE' }))
+  const clearFindings = () =>
+    mutate(() => requestJson<void>('/api/findings', { method: 'DELETE' }))
+
+  const groupCount = state.chat_groups === 'all'
+    ? ('all' as const)
+    : Array.isArray(state.chat_groups)
+      ? state.chat_groups.length
+      : 1
+
+  const content = (() => {
+    if (isLoading) return <LoadingState />
+
+    switch (tab) {
+      case 'overview':
+        return <Overview state={state} />
+      case 'products':
+        return (
+          <ProductsPanel
+            products={state.products}
+            disabled={isMutating}
+            onAdd={addProduct}
+            onDelete={deleteProduct}
+            onEdit={editProduct}
+          />
+        )
+      case 'groups':
+        return (
+          <ChatGroupsPanel
+            chatGroups={groupsToText(state.chat_groups)}
+            disabled={isMutating}
+            onSave={saveChatGroups}
+          />
+        )
+      case 'findings':
+        return (
+          <FindingsTable
+            findings={state.findings.slice(0, 200)}
+            onDelete={deleteFinding}
+            onClearAll={clearFindings}
+          />
+        )
+      case 'logs':
+        return <LogsPanel />
+      default:
+        return null
+    }
+  })()
 
   return (
-    <div className="min-h-screen bg-white font-sans text-ink antialiased">
-      <Header />
-      <main className="mx-auto flex w-full max-w-5xl flex-col gap-10 px-6 py-8 sm:px-8 lg:px-10">
-        {error ? (
-          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700" role="alert">
+    <div className="min-h-screen bg-panel-bg font-body text-txt-primary antialiased">
+      <Sidebar
+        active={tab}
+        onChange={setTab}
+        counts={{
+          products: state.products.length,
+          groups: groupCount,
+          findings: state.findings.length,
+        }}
+      />
+
+      <main className="min-h-screen p-6 pt-16 lg:ml-56 lg:p-8 lg:pt-8">
+        {error && (
+          <div className="mb-6 rounded-lg border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger" role="alert">
             {error}
           </div>
-        ) : null}
-        {isLoading ? (
-          <LoadingState />
-        ) : (
-          <>
-            <ProductsPanel
-              products={state.products}
-              disabled={isMutating}
-              onAdd={addProduct}
-              onDelete={deleteProduct}
-              onEdit={editProduct}
-            />
-            <ChatGroupsPanel
-              chatGroups={groupsToText(state.chat_groups)}
-              disabled={isMutating}
-              onSave={saveChatGroups}
-            />
-            <FindingsTable findings={state.findings.slice(0, 200)} />
-          </>
         )}
+        {content}
       </main>
-      <Footer />
     </div>
   )
 }

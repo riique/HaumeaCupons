@@ -18,39 +18,38 @@ function ConfirmDialog({
   onConfirm,
 }: ConfirmDialogProps) {
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/30 px-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
       <div
-        className="w-full max-w-md rounded-lg border border-gray-200 bg-white p-5 shadow-xl"
+        className="w-full max-w-md rounded-lg border border-panel-border bg-panel-surface p-5"
         role="dialog"
         aria-modal="true"
         aria-labelledby="confirm-title"
       >
         <div className="flex items-start justify-between gap-4">
           <div className="flex items-center gap-3">
-            <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-red-50 text-red-600">
-              <AlertTriangle className="h-5 w-5" aria-hidden="true" />
+            <span className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-danger/10 text-danger">
+              <AlertTriangle className="h-5 w-5" />
             </span>
-            <h3 id="confirm-title" className="text-base font-medium text-ink">
+            <h3 id="confirm-title" className="text-base font-semibold text-txt-primary">
               {title}
             </h3>
           </div>
           <button
-            className="inline-flex h-9 w-9 items-center justify-center rounded-md text-slate-400 transition hover:bg-gray-50 hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-txt-muted transition hover:bg-panel-hover hover:text-txt-primary disabled:opacity-40"
             type="button"
             onClick={onCancel}
             disabled={disabled}
-            aria-label="Cancelar"
             title="Cancelar"
           >
-            <X className="h-4 w-4" aria-hidden="true" />
+            <X className="h-4 w-4" />
           </button>
         </div>
 
-        <p className="mt-4 text-sm leading-6 text-slate-500">{message}</p>
+        <p className="mt-4 text-sm leading-6 text-txt-secondary">{message}</p>
 
         <div className="mt-6 flex justify-end gap-3">
           <button
-            className="inline-flex h-10 items-center justify-center rounded-md border border-gray-200 px-4 text-sm text-slate-600 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex h-9 items-center justify-center rounded-md border border-panel-border px-4 text-sm text-txt-secondary transition hover:bg-panel-hover disabled:opacity-40"
             type="button"
             onClick={onCancel}
             disabled={disabled}
@@ -58,7 +57,7 @@ function ConfirmDialog({
             Cancelar
           </button>
           <button
-            className="inline-flex h-10 items-center justify-center rounded-md border border-red-600 bg-red-600 px-4 text-sm text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex h-9 items-center justify-center rounded-md bg-danger px-4 text-sm font-medium text-white transition hover:bg-danger/80 disabled:opacity-40"
             type="button"
             onClick={onConfirm}
             disabled={disabled}
