@@ -73,7 +73,6 @@ def test_load_settings_reads_env_and_bootstraps_data(tmp_path, monkeypatch) -> N
     monkeypatch.setenv("API_ID", "123456")
     monkeypatch.setenv("API_HASH", "test_hash")
     monkeypatch.setenv("PHONE", "+5500000000000")
-    monkeypatch.setenv("MAIN_USER_ID", "42")
     monkeypatch.setenv("CHAT_GROUPS", "grupo-a,grupo-b")
     monkeypatch.setenv("PRODUCTS_KEYWORDS", "notebook,ssd")
 
@@ -82,7 +81,6 @@ def test_load_settings_reads_env_and_bootstraps_data(tmp_path, monkeypatch) -> N
     assert settings.api_id == 123456
     assert settings.api_hash == "test_hash"
     assert settings.phone == "+5500000000000"
-    assert settings.main_user_id == 42
     assert settings.chat_groups == ["grupo-a", "grupo-b"]
     assert settings.product_keywords == ["notebook", "ssd"]
 
@@ -107,14 +105,13 @@ def test_ssrf_private_urls_are_blocked() -> None:
     asyncio.run(run_case())
 
 
-def test_handler_simule_dummy_login_alert() -> None:
+def test_handler_saves_finding_without_sending_telegram_message() -> None:
     async def run_case() -> None:
         with TemporaryDirectory() as tmp:
             settings = Settings(
                 api_id=1,
                 api_hash="hash",
                 phone="+5500000000000",
-                main_user_id=42,
                 chat_groups="all",
                 products=[Product(keywords=["notebook"], max_price=5000.0)],
                 keywords=["notebook"],
@@ -137,12 +134,7 @@ def test_handler_simule_dummy_login_alert() -> None:
             with patch("main.verify_links", return_value=expected):
                 await build_handler(settings)(event)
 
-            assert len(event.client.sent_messages) == 1
-            user_id, message, link_preview = event.client.sent_messages[0]
-            assert user_id == 42
-            assert link_preview is False
-            assert "SAVE10" in message
-            assert "Oferta Notebook" in message
+            assert event.client.sent_messages == []
             findings = get_findings(db_path=Path(tmp) / "findings.sqlite3")
             assert len(findings) == 1
             assert findings[0]["product_keyword"] == "notebook"
@@ -158,7 +150,6 @@ def test_handler_does_not_alert_when_only_failed_page_has_price() -> None:
                 api_id=1,
                 api_hash="hash",
                 phone="+5500000000000",
-                main_user_id=42,
                 chat_groups="all",
                 products=[Product(keywords=["notebook"], max_price=5000.0)],
                 keywords=["notebook"],

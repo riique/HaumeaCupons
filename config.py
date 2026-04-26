@@ -31,16 +31,6 @@ def _env_int(name: str, default: int) -> int:
         raise RuntimeError(f"{name} must be an integer") from exc
 
 
-def _env_float(name: str, default: float) -> float:
-    value = os.getenv(name, "").strip()
-    if not value:
-        return default
-    try:
-        return float(value)
-    except ValueError as exc:
-        raise RuntimeError(f"{name} must be a number") from exc
-
-
 @dataclass(frozen=True)
 class Product:
     keywords: list[str]
@@ -55,7 +45,6 @@ class Product:
 class Settings:
     api_id: int
     api_hash: str
-    main_user_id: int
     chat_groups: str | list[str]
     products: list[Product]
     keywords: list[str]
@@ -64,8 +53,6 @@ class Settings:
     session_name: str = "haumea_cupons"
     logs_dir: Path = Path("logs")
     allow_all_chats: bool = False
-    alert_min_interval_seconds: float = 1.2
-    max_alert_queue_size: int = 100
     dedupe_ttl_seconds: int = 1800
 
     @property
@@ -176,20 +163,16 @@ def load_settings() -> Settings:
     api_hash = os.getenv("API_HASH", "")
     bot_token = os.getenv("BOT_TOKEN", "")
     phone = os.getenv("PHONE", "")
-    main_user_id_raw = os.getenv("MAIN_USER_ID", "")
 
     if not api_id_raw or not api_hash:
         raise RuntimeError("Missing required env vars: API_ID, API_HASH")
     if not bot_token and not phone:
         raise RuntimeError("Set BOT_TOKEN (recommended) or PHONE in .env")
-    if not main_user_id_raw:
-        raise RuntimeError("Missing required env var: MAIN_USER_ID")
 
     try:
         api_id = int(api_id_raw)
-        main_user_id = int(main_user_id_raw)
     except ValueError as exc:
-        raise RuntimeError("API_ID and MAIN_USER_ID must be integers") from exc
+        raise RuntimeError("API_ID must be an integer") from exc
 
     products_raw = data.get("products")
     products = _parse_products(products_raw or DEFAULT_DATA["products"])
@@ -200,8 +183,6 @@ def load_settings() -> Settings:
     chat_groups = _parse_chat_groups(chat_groups_raw if chat_groups_raw is not None else DEFAULT_DATA["chat_groups"])
     keywords = list(dict.fromkeys(kw.lower() for product in products for kw in product.keywords))
     allow_all_chats = _env_bool("ALLOW_ALL_CHATS", False)
-    alert_min_interval_seconds = max(1.0, _env_float("ALERT_MIN_INTERVAL_SECONDS", 1.2))
-    max_alert_queue_size = max(1, _env_int("MAX_ALERT_QUEUE_SIZE", 100))
     dedupe_ttl_seconds = max(60, _env_int("DEDUPE_TTL_SECONDS", 1800))
 
     return Settings(
@@ -209,12 +190,9 @@ def load_settings() -> Settings:
         api_hash=api_hash,
         bot_token=bot_token,
         phone=phone,
-        main_user_id=main_user_id,
         chat_groups=chat_groups,
         products=products,
         keywords=keywords,
         allow_all_chats=allow_all_chats,
-        alert_min_interval_seconds=alert_min_interval_seconds,
-        max_alert_queue_size=max_alert_queue_size,
         dedupe_ttl_seconds=dedupe_ttl_seconds,
     )

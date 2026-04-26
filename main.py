@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
-import os
 import time
 from contextlib import suppress
 from datetime import datetime, timezone
@@ -12,7 +11,6 @@ from typing import Any
 
 from config import DATA_FILE, Settings, load_settings
 from storage import add_finding, finding_exists, init_findings_db, migrate_alerts_jsonl
-from telethon.errors import FloodWaitError
 from verifier import VerificationResult, extract_coupons, extract_links, match_price_range, verify_links
 
 
@@ -136,29 +134,8 @@ async def send_alert_with_retry(
     *,
     rate_limit_retry_seconds: int = 60,
 ) -> bool:
-    try:
-        await client.send_message(target, alert, link_preview=False)
-        logging.info("  Alerta enviado")
-        return True
-    except FloodWaitError as fw:
-        wait_seconds = int(fw.seconds) + 1
-        logging.warning("  Flood wait %ds; aguardando antes do retry", wait_seconds)
-        await asyncio.sleep(wait_seconds)
-    except Exception as exc:
-        if not _is_rate_limit_error(exc):
-            logging.error("  Falha ao enviar alerta: %s", exc)
-            return False
-        wait_seconds = max(1, int(rate_limit_retry_seconds))
-        logging.warning("  Rate limit ao enviar alerta; aguardando %ds antes do retry: %s", wait_seconds, exc)
-        await asyncio.sleep(wait_seconds)
-
-    try:
-        await client.send_message(target, alert, link_preview=False)
-        logging.info("  Alerta enviado no retry")
-        return True
-    except Exception as exc:
-        logging.error("  Falha no retry do alerta: %s", exc)
-        return False
+    logging.info("Envio Telegram desativado; alerta nao enviado")
+    return False
 
 
 class AlertDispatcher:
@@ -218,7 +195,6 @@ class SettingsStore:
         self.settings = settings
         self.data_file = data_file
         self.interval_seconds = interval_seconds
-        self.alert_target: Any = settings.main_user_id
         self.dedupe_cache = DedupeCache(getattr(settings, "dedupe_ttl_seconds", 1800))
         self._mtime = self._current_mtime()
 
@@ -248,7 +224,7 @@ class SettingsStore:
                 logging.exception("Falha ao recarregar configuração")
 
 
-def build_handler(settings_store: Settings | SettingsStore, dispatcher: AlertDispatcher | None = None):
+def build_handler(settings_store: Settings | SettingsStore):
     store = settings_store if isinstance(settings_store, SettingsStore) else SettingsStore(settings_store)
 
     async def handler(event) -> None:
@@ -350,11 +326,7 @@ def build_handler(settings_store: Settings | SettingsStore, dispatcher: AlertDis
             db_path=findings_db,
         )
 
-        alert = format_alert(chat_title, text, coupons, results)
-        if dispatcher:
-            await dispatcher.enqueue(store.alert_target, alert)
-        else:
-            await send_alert_with_retry(event.client, store.alert_target, alert)
+        logging.info("  Finding salvo no banco; envio Telegram desativado")
 
     return handler
 
@@ -378,13 +350,7 @@ async def run() -> None:
     client = TelegramClient(settings.session_name, settings.api_id, settings.api_hash)
     settings_store = SettingsStore(settings)
     reload_task = asyncio.create_task(settings_store.watch())
-    dispatcher = AlertDispatcher(
-        client,
-        min_interval_seconds=settings.alert_min_interval_seconds,
-        max_queue_size=settings.max_alert_queue_size,
-    )
-    await dispatcher.start()
-    handler = build_handler(settings_store, dispatcher)
+    handler = build_handler(settings_store)
     client.add_event_handler(handler, events.NewMessage(incoming=True))
 
     if settings.bot_token:
@@ -394,39 +360,11 @@ async def run() -> None:
         logging.info("Iniciando como conta de usuário (telefone)")
         await client.start(phone=settings.phone)
 
-    # Pre-resolve target user so send_message works later
-    me = await client.get_me()
-    if me.id == settings.main_user_id:
-        settings_store.alert_target = "me"
-        logging.info("Alertas → Mensagens Salvas (própria conta)")
-    else:
-        resolved = False
-        # Try by numeric ID
-        try:
-            entity = await client.get_input_entity(settings.main_user_id)
-            settings_store.alert_target = entity
-            resolved = True
-        except ValueError:
-            pass
-        # Try by username from env
-        if not resolved:
-            username = os.environ.get("MAIN_USERNAME", "").strip().lstrip("@")
-            if username:
-                try:
-                    entity = await client.get_input_entity(username)
-                    settings_store.alert_target = entity
-                    resolved = True
-                    logging.info("Alertas → @%s", username)
-                except ValueError:
-                    pass
-        if not resolved:
-            settings_store.alert_target = "me"
-            logging.warning("Não resolveu MAIN_USER_ID=%d — alertas irão para Mensagens Salvas", settings.main_user_id)
-
     group_str = "TODOS os grupos" if settings.chat_groups == "all" else f"{len(settings.chat_groups)} grupos"
     kw_count = len(settings.keywords)
     prod_count = len(settings.products)
     logging.info("✓ Bot iniciado — monitorando %s | %d produto(s) | %d palavra(s)-chave", group_str, prod_count, kw_count)
+    logging.info("Envio de mensagens Telegram desativado; findings serão salvos apenas no banco/dashboard")
     for p in settings.products:
         logging.info("  • [%.2f] %s", p.max_price, ", ".join(p.keywords))
     try:
@@ -435,7 +373,6 @@ async def run() -> None:
         reload_task.cancel()
         with suppress(asyncio.CancelledError):
             await reload_task
-        await dispatcher.stop()
 
 
 if __name__ == "__main__":

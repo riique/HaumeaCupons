@@ -11,7 +11,7 @@ Protecoes atuais:
 - `events.NewMessage(incoming=True)` evita processar mensagens de saida.
 - Conta de usuario com `chat_groups=all` fica bloqueada por padrao.
 - `ALLOW_ALL_CHATS=true` e necessario para assumir esse risco explicitamente.
-- Alertas passam por fila com intervalo minimo antes de `send_message`.
+- O bot nao envia mensagens no Telegram; ele apenas salva findings no SQLite para o dashboard.
 - Mensagens ja processadas sao deduplicadas por chat/mensagem/hash.
 - `/api/*` aceita `DASHBOARD_API_KEY` para proteger painel e operacoes destrutivas.
 - `tunnel.sh` se recusa a expor o dashboard sem `DASHBOARD_API_KEY`.
@@ -42,12 +42,8 @@ python main.py
 - `API_HASH`: API hash do Telegram.
 - `BOT_TOKEN`: token do BotFather. Preferivel quando o caso de uso permitir.
 - `PHONE`: telefone da conta de usuario. Use apenas quando realmente precisar MTProto como usuario.
-- `MAIN_USER_ID`: ID numerico do usuario que recebera alertas.
-- `MAIN_USERNAME`: fallback para resolver o destinatario dos alertas.
 - `CHAT_GROUPS`: grupos permitidos. Use IDs/usernames separados por virgula.
 - `ALLOW_ALL_CHATS`: precisa ser `true` para permitir `chat_groups=all` em conta de usuario.
-- `ALERT_MIN_INTERVAL_SECONDS`: intervalo minimo por destino antes de enviar outro alerta. Padrao: `1.2`.
-- `MAX_ALERT_QUEUE_SIZE`: tamanho maximo da fila de alertas. Padrao: `100`.
 - `DEDUPE_TTL_SECONDS`: janela de dedupe em memoria. Padrao: `1800`.
 - `DASHBOARD_API_KEY`: chave exigida em `/api/*` quando definida.
 
@@ -106,7 +102,7 @@ npm run build
 ## Arquivos principais
 
 - `config.py`: leitura e validacao de ambiente.
-- `main.py`: cliente Telethon, filtros, dedupe, fila de alertas e handler `NewMessage`.
+- `main.py`: cliente Telethon, filtros, dedupe, persistencia em SQLite e handler `NewMessage`.
 - `verifier.py`: extracao de links/cupons e verificacao HTTP/HTML.
 - `storage.py`: SQLite de findings e dedupe persistente.
 - `app.py`: API FastAPI, auth opcional por chave e entrega do build React.
