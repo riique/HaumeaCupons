@@ -9,8 +9,6 @@ export type Product = {
 
 export type ProductPayload = Omit<Product, 'id'>
 
-export type ChatGroups = string | string[]
-
 export type Finding = {
   id: number | string
   timestamp: string
@@ -28,7 +26,6 @@ export type Finding = {
 
 export type ApiState = {
   products: Product[]
-  chat_groups: ChatGroups
   findings: Finding[]
 }
 
@@ -38,4 +35,4 @@ export type FindingsPage = {
   offset: number
 }
 
-export type Tab = 'overview' | 'products' | 'groups' | 'findings'
+export type Tab = 'overview' | 'products' | 'findings'

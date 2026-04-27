@@ -1,7 +1,6 @@
 import { LogOut } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 
-import ChatGroupsPanel from './components/ChatGroupsPanel'
 import FindingsTable from './components/FindingsTable'
 import Overview from './components/Overview'
 import ProductsPanel from './components/ProductsPanel'
@@ -13,7 +12,6 @@ import {
   deleteProduct as deleteProductFromFirestore,
   fetchDashboardState,
   fetchFindings,
-  saveChatGroups as saveChatGroupsToFirestore,
   updateProduct as updateProductInFirestore,
 } from './api'
 import { useAuth } from './contexts/AuthContext'
@@ -23,12 +21,7 @@ import type { ApiState, ProductPayload, Tab } from './types'
 
 const emptyState: ApiState = {
   products: [],
-  chat_groups: 'all',
   findings: [],
-}
-
-function groupsToText(chatGroups: ApiState['chat_groups']) {
-  return Array.isArray(chatGroups) ? chatGroups.join('\n') : chatGroups
 }
 
 function LoadingState() {
@@ -124,8 +117,6 @@ function App() {
     mutate(() => updateProductInFirestore(id, p))
   const deleteProduct = (id: number | string) =>
     mutate(() => deleteProductFromFirestore(id))
-  const saveChatGroups = (g: string) =>
-    mutate(() => saveChatGroupsToFirestore(g))
   const deleteFinding = (id: number | string) =>
     mutate(() => deleteFindingFromFirestore(id))
   const clearFindings = () =>
@@ -158,12 +149,6 @@ function App() {
       : <Login onRegister={() => navigate('/register')} />
   }
 
-  const groupCount = state.chat_groups === 'all'
-    ? ('all' as const)
-    : Array.isArray(state.chat_groups)
-      ? state.chat_groups.length
-      : 1
-
   const content = (() => {
     if (isLoading) return <LoadingState />
 
@@ -178,14 +163,6 @@ function App() {
             onAdd={addProduct}
             onDelete={deleteProduct}
             onEdit={editProduct}
-          />
-        )
-      case 'groups':
-        return (
-          <ChatGroupsPanel
-            chatGroups={groupsToText(state.chat_groups)}
-            disabled={isMutating}
-            onSave={saveChatGroups}
           />
         )
       case 'findings':
@@ -208,7 +185,6 @@ function App() {
         onChange={setTab}
         counts={{
           products: state.products.length,
-          groups: groupCount,
           findings: state.findings.length,
         }}
       />

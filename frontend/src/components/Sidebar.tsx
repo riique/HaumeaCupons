@@ -1,4 +1,4 @@
-import { Activity, BarChart3, Menu, MessageSquare, Package, Radio, X } from 'lucide-react'
+import { Activity, BarChart3, Menu, Package, Radio, X } from 'lucide-react'
 import { useState } from 'react'
 import type { Tab } from '../types'
 
@@ -7,7 +7,6 @@ type SidebarProps = {
   onChange: (tab: Tab) => void
   counts: {
     products: number
-    groups: number | 'all'
     findings: number
   }
 }
@@ -15,7 +14,6 @@ type SidebarProps = {
 const nav: { key: Tab; label: string; icon: typeof Activity }[] = [
   { key: 'overview', label: 'Visão Geral', icon: BarChart3 },
   { key: 'products', label: 'Produtos', icon: Package },
-  { key: 'groups', label: 'Grupos', icon: MessageSquare },
   { key: 'findings', label: 'Alertas', icon: Radio },
 ]
 
@@ -104,12 +102,6 @@ function Sidebar({ active, onChange, counts }: SidebarProps) {
             <div className="flex items-center justify-between">
               <span>Produtos</span>
               <span className="font-mono text-txt-secondary">{counts.products}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span>Grupos</span>
-              <span className="font-mono text-txt-secondary">
-                {counts.groups === 'all' ? 'Todos' : counts.groups}
-              </span>
             </div>
             <div className="flex items-center justify-between">
               <span>Alertas</span>

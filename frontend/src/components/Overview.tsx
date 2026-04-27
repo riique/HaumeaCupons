@@ -1,4 +1,4 @@
-import { Package, Radio, MessageSquare, TrendingUp } from 'lucide-react'
+import { Package, Radio, TrendingUp } from 'lucide-react'
 import type { ApiState } from '../types'
 
 type OverviewProps = { state: ApiState }
@@ -18,9 +18,7 @@ function relativeTime(iso: string) {
 }
 
 function Overview({ state }: OverviewProps) {
-  const { products, chat_groups, findings } = state
-  const groupCount = chat_groups === 'all' ? 'Todos' : Array.isArray(chat_groups) ? chat_groups.length : 1
-  const groupCountNum = chat_groups === 'all' ? '∞' : String(groupCount)
+  const { products, findings } = state
   const approvedFindings = findings.filter((f) => f.price_ok)
   const totalKeywords = products.reduce((acc, p) => acc + p.keywords.length, 0)
 
@@ -32,14 +30,6 @@ function Overview({ state }: OverviewProps) {
       icon: Package,
       accent: 'text-haumea-400',
       bg: 'bg-haumea-600/8',
-    },
-    {
-      label: 'Grupos Ativos',
-      value: groupCountNum,
-      sub: chat_groups === 'all' ? 'monitorando tudo' : `grupo${groupCount !== 1 ? 's' : ''} configurado${groupCount !== 1 ? 's' : ''}`,
-      icon: MessageSquare,
-      accent: 'text-sky-400',
-      bg: 'bg-sky-500/8',
     },
     {
       label: 'Alertas Capturados',
@@ -66,7 +56,7 @@ function Overview({ state }: OverviewProps) {
         <p className="mt-1 text-sm text-txt-muted">Resumo do monitoramento em tempo real.</p>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {cards.map((c) => (
           <div
             key={c.label}

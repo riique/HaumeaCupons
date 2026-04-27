@@ -3,7 +3,6 @@ import {
   collection,
   deleteDoc,
   doc,
-  getDoc,
   getDocs,
   limit,
   orderBy,
@@ -11,7 +10,6 @@ import {
   serverTimestamp,
   setDoc,
   updateDoc,
-  where,
   writeBatch,
   type DocumentData,
   type QueryDocumentSnapshot,
@@ -63,20 +61,6 @@ function findingFromDoc(docSnap: QueryDocumentSnapshot<DocumentData>): Finding {
     source_message_id: String(data.sourceMessageId ?? data.source_message_id ?? ''),
     user_id: String(data.userId ?? data.user_id ?? ''),
   }
-}
-
-function parseGroups(value: string) {
-  const trimmed = value.trim()
-  if (!trimmed || trimmed.toLowerCase() === 'all') return 'all' as const
-  return trimmed
-    .replaceAll(',', '\n')
-    .split('\n')
-    .map((group) => group.trim())
-    .filter(Boolean)
-}
-
-function groupDocId(group: string) {
-  return group.trim().toLowerCase().replace(/^@/, '').replaceAll('/', '_')
 }
 
 export async function fetchProducts(): Promise<Product[]> {
@@ -141,62 +125,13 @@ export async function clearAllFindings(): Promise<void> {
   }
 }
 
-export async function fetchChatGroups(): Promise<string> {
-  const database = requireDb()
-  const config = (await getDoc(doc(database, 'chat_groups', 'config'))).data()
-  if (config?.mode === 'all') return 'all'
-
-  const docs = await getDocs(query(collection(database, 'chat_groups'), where('active', '==', true)))
-  const groups = docs.docs
-    .filter((docSnap) => docSnap.id !== 'config')
-    .map((docSnap) => String(docSnap.data().name ?? docSnap.id).trim())
-    .filter(Boolean)
-  return groups.length > 0 ? groups.join('\n') : 'all'
-}
-
-export async function saveChatGroups(groups: string): Promise<void> {
-  const database = requireDb()
-  const parsed = parseGroups(groups)
-  const configRef = doc(database, 'chat_groups', 'config')
-
-  if (parsed === 'all') {
-    await setDoc(configRef, { mode: 'all', active: true, updatedAt: serverTimestamp() }, { merge: true })
-    return
-  }
-
-  const existingDocs = await getDocs(collection(database, 'chat_groups'))
-  const nextIds = new Set(parsed.map(groupDocId).filter(Boolean))
-  const batch = writeBatch(database)
-  batch.set(configRef, { mode: 'list', active: true, updatedAt: serverTimestamp() }, { merge: true })
-
-  existingDocs.docs.forEach((docSnap) => {
-    if (docSnap.id !== 'config' && !nextIds.has(docSnap.id)) {
-      batch.set(docSnap.ref, { active: false, updatedAt: serverTimestamp() }, { merge: true })
-    }
-  })
-
-  parsed.forEach((group) => {
-    const id = groupDocId(group)
-    if (!id) return
-    batch.set(
-      doc(database, 'chat_groups', id),
-      { name: group, active: true, addedAt: serverTimestamp(), updatedAt: serverTimestamp() },
-      { merge: true },
-    )
-  })
-
-  await batch.commit()
-}
-
 export async function fetchDashboardState(): Promise<ApiState> {
-  const [products, chatGroups, findings] = await Promise.all([
+  const [products, findings] = await Promise.all([
     fetchProducts(),
-    fetchChatGroups(),
     fetchFindings(200),
   ])
   return {
     products,
-    chat_groups: chatGroups,
     findings,
   }
 }
