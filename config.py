@@ -42,6 +42,7 @@ def _env_int(name: str, default: int) -> int:
 class Product:
     keywords: list[str]
     max_price: float
+    notify_email: str = ""
 
     @property
     def primary_keyword(self) -> str:
@@ -141,7 +142,8 @@ def _parse_products(raw: Any) -> list[Product]:
             raise RuntimeError(f"Invalid max_price for product {kws!r}") from exc
         if max_price < 0:
             raise RuntimeError(f"max_price must be >= 0 for product {kws!r}")
-        products.append(Product(keywords=kws, max_price=max_price))
+        notify_email = str(item.get("notify_email", "")).strip()
+        products.append(Product(keywords=kws, max_price=max_price, notify_email=notify_email))
 
     if not products:
         products = [Product(**DEFAULT_DATA["products"][0])]

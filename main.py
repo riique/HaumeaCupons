@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import logging
 import os
 import time
@@ -344,6 +345,28 @@ def build_handler(settings_store: Settings | SettingsStore):
                 firestore_save_finding(finding_payload, user_id="bot")
             except Exception:
                 logging.exception("Falha ao sincronizar finding com Firestore")
+
+        # WhatsApp notification - write to Hermes cron queue
+        if best_kw and settings.products:
+            for product in settings.products:
+                if best_kw in product.keywords and product.notify_email:
+                    notif_dir = Path("~/.hermes/cron/notifications/incoming").expanduser()
+                    notif_dir.mkdir(parents=True, exist_ok=True)
+                    notif_payload = {
+                        "id": message_hash,
+                        "product": best_kw,
+                        "price": best_price,
+                        "url": all_links[0] if all_links else "",
+                        "source": chat_title,
+                        "timestamp": timestamp,
+                        "notify_email": product.notify_email,
+                    }
+                    notif_path = notif_dir / f"{message_hash}.json"
+                    with open(notif_path.with_suffix(".tmp"), "w", encoding="utf-8") as file:
+                        json.dump(notif_payload, file, indent=2)
+                    notif_path.with_suffix(".tmp").replace(notif_path)
+                    logging.info("   Notificação WhatsApp enfileirada para %s", product.notify_email)
+                    break
 
         logging.info("  Finding salvo no banco; envio Telegram desativado")
 
