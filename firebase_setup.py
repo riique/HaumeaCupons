@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from dotenv import load_dotenv
+
 try:
     import firebase_admin
     from firebase_admin import auth, credentials, firestore
@@ -17,6 +19,7 @@ except ImportError:  # pragma: no cover - exercised when dependency is not insta
     FieldFilter = None
 
 
+load_dotenv(dotenv_path=Path(".env"))
 SERVICE_ACCOUNT_FILE = Path(
     os.getenv("FIREBASE_SERVICE_ACCOUNT", "haumea-cupons-firebase-adminsdk-fbsvc-225d0c512e.json")
 )

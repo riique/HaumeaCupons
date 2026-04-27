@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 try:
     from firebase_setup import get_chat_groups as firestore_get_chat_groups
     from firebase_setup import list_products as firestore_list_products
-except Exception:  # pragma: no cover - local JSON fallback must keep the bot bootable
+except Exception:  # pragma: no cover - Firestore dependency may be unavailable locally
     firestore_get_chat_groups = None
     firestore_list_products = None
 
@@ -69,9 +69,8 @@ class Settings:
 
 
 DATA_FILE = Path("data.json")
-ENV_PRODUCT_MAX_PRICE = 1_000_000.0
 DEFAULT_DATA = {
-    "products": [{"keywords": ["iphone"], "max_price": 200.0}],
+    "products": [],
     "chat_groups": "all",
 }
 
@@ -89,15 +88,8 @@ def _atomic_save_json(path: Path, payload: dict[str, Any]) -> None:
     tmp_path.replace(path)
 
 
-def _env_products_from_keywords(keywords: list[str]) -> list[dict[str, Any]]:
-    # Seed: one product per keyword from .env, no price cap
-    return [{"keywords": [keyword], "max_price": ENV_PRODUCT_MAX_PRICE} for keyword in keywords]
-
-
-def _initial_data_from_env(chat_groups: str | None, product_keywords: list[str]) -> dict[str, Any]:
+def _initial_data_from_env(chat_groups: str | None) -> dict[str, Any]:
     data = _default_data()
-    if product_keywords:
-        data["products"] = _env_products_from_keywords(product_keywords)
     if chat_groups:
         data["chat_groups"] = _parse_chat_groups(chat_groups)
     return data
@@ -145,8 +137,6 @@ def _parse_products(raw: Any) -> list[Product]:
         notify_email = str(item.get("notify_email", item.get("created_by", ""))).strip()
         products.append(Product(keywords=kws, max_price=max_price, notify_email=notify_email))
 
-    if not products:
-        products = [Product(**DEFAULT_DATA["products"][0])]
     return products
 
 
@@ -165,8 +155,7 @@ def _parse_chat_groups(raw: Any) -> str | list[str]:
 def load_settings() -> Settings:
     load_dotenv()
     chat_groups_env = os.getenv("CHAT_GROUPS")
-    product_keywords_env = _split_csv(os.getenv("PRODUCTS_KEYWORDS", ""))
-    data = _load_data(initial_data=_initial_data_from_env(chat_groups_env, product_keywords_env))
+    data = _load_data(initial_data=_initial_data_from_env(chat_groups_env))
 
     api_id_raw = os.getenv("API_ID", "")
     api_hash = os.getenv("API_HASH", "")
@@ -184,15 +173,12 @@ def load_settings() -> Settings:
         raise RuntimeError("API_ID must be an integer") from exc
 
     firestore_products = firestore_list_products() if firestore_list_products is not None else None
-    if firestore_products is not None:
-        products_raw = [
-            product
-            for product in firestore_products
-            if not isinstance(product, dict) or product.get("active", True)
-        ]
-    else:
-        products_raw = data.get("products")
-    products = _parse_products(products_raw or DEFAULT_DATA["products"])
+    products_raw = [
+        product
+        for product in (firestore_products or [])
+        if not isinstance(product, dict) or product.get("active", True)
+    ]
+    products = _parse_products(products_raw)
 
     firestore_chat_groups = firestore_get_chat_groups() if firestore_get_chat_groups is not None else None
     chat_groups_raw = firestore_chat_groups if firestore_chat_groups is not None else data.get("chat_groups")
