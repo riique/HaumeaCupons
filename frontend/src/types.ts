@@ -1,7 +1,10 @@
 export type Product = {
-  id: number
+  id: number | string
   keywords: string[]
   max_price: number
+  active?: boolean
+  created_by?: string
+  created_at?: string
 }
 
 export type ProductPayload = Omit<Product, 'id'>
@@ -9,7 +12,7 @@ export type ProductPayload = Omit<Product, 'id'>
 export type ChatGroups = string | string[]
 
 export type Finding = {
-  id: number
+  id: number | string
   timestamp: string
   product_keyword: string
   url: string
@@ -18,6 +21,9 @@ export type Finding = {
   source_group: string
   coupons: string[]
   links: string[]
+  source_chat_id?: string
+  source_message_id?: string
+  user_id?: string
 }
 
 export type ApiState = {
@@ -32,4 +38,4 @@ export type FindingsPage = {
   offset: number
 }
 
-export type Tab = 'overview' | 'products' | 'groups' | 'findings' | 'logs'
+export type Tab = 'overview' | 'products' | 'groups' | 'findings'

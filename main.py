@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import os
 import time
 from contextlib import suppress
 from datetime import datetime, timezone
@@ -10,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from config import DATA_FILE, Settings, load_settings
+from firebase_setup import save_finding as firestore_save_finding
 from storage import add_finding, finding_exists, init_findings_db, migrate_alerts_jsonl
 from verifier import VerificationResult, extract_coupons, extract_links, match_price_range, verify_links
 
@@ -310,6 +312,18 @@ def build_handler(settings_store: Settings | SettingsStore):
                 if result.price is not None:
                     best_price = result.price
                     break
+        finding_payload = {
+            "timestamp": timestamp,
+            "product_keyword": best_kw,
+            "url": all_links[0] if all_links else "",
+            "price_found": best_price,
+            "price_ok": True,
+            "source_group": chat_title,
+            "coupons": coupons,
+            "links": all_links,
+            "source_chat_id": source_chat_id,
+            "source_message_id": source_message_id,
+        }
         add_finding(
             timestamp=timestamp,
             product_keyword=best_kw,
@@ -325,6 +339,11 @@ def build_handler(settings_store: Settings | SettingsStore):
             url_hash=_hash_value("|".join(sorted(all_links)) or "|".join(coupons) or text[:200]),
             db_path=findings_db,
         )
+        if os.getenv("FIRESTORE_SYNC_FINDINGS", "").strip().lower() in {"1", "true", "yes", "on"}:
+            try:
+                firestore_save_finding(finding_payload, user_id="bot")
+            except Exception:
+                logging.exception("Falha ao sincronizar finding com Firestore")
 
         logging.info("  Finding salvo no banco; envio Telegram desativado")
 

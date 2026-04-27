@@ -8,8 +8,8 @@ type ProductsPanelProps = {
   products: Product[]
   disabled: boolean
   onAdd: (product: ProductPayload) => void
-  onDelete: (id: number) => void
-  onEdit: (id: number, product: ProductPayload) => void
+  onDelete: (id: number | string) => void
+  onEdit: (id: number | string, product: ProductPayload) => void
 }
 
 type ProductFormProps = {
@@ -40,6 +40,9 @@ function KeywordInput({
   disabled: boolean
 }) {
   const [draft, setDraft] = useState('')
+  const [isImporting, setIsImporting] = useState(false)
+  const [importDraft, setImportDraft] = useState('')
+  const [importError, setImportError] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
 
   const commit = useCallback(() => {
@@ -62,35 +65,113 @@ function KeywordInput({
 
   const remove = (kw: string) => onChange(value.filter((k) => k !== kw))
 
+  const openImport = () => {
+    if (disabled) return
+    setImportDraft('')
+    setImportError('')
+    setIsImporting(true)
+  }
+
+  const closeImport = () => {
+    setIsImporting(false)
+    setImportDraft('')
+    setImportError('')
+  }
+
+  const confirmImport = () => {
+    try {
+      const parsed = JSON.parse(importDraft)
+      if (!Array.isArray(parsed) || parsed.some((item) => typeof item !== 'string')) {
+        throw new Error('Expected a string array')
+      }
+
+      const seen = new Set(value)
+      const imported = parsed
+        .map((kw) => kw.trim().toLowerCase())
+        .filter((kw) => {
+          if (!kw || seen.has(kw)) return false
+          seen.add(kw)
+          return true
+        })
+
+      onChange([...value, ...imported])
+      closeImport()
+    } catch {
+      setImportError('JSON inválido. Use o formato: ["palavra1", "palavra2"]')
+    }
+  }
+
   return (
-    <div
-      className="flex min-h-[42px] w-full flex-wrap gap-1.5 rounded-md border border-panel-border bg-panel-bg px-2.5 py-1.5 cursor-text transition focus-within:border-haumea-600"
-      onClick={() => inputRef.current?.focus()}
-    >
-      {value.map((kw) => (
-        <span
-          key={kw}
-          className="inline-flex items-center gap-1 rounded bg-haumea-600/15 px-2 py-0.5 text-xs font-mono text-haumea-300"
+    <>
+      <div
+        className="flex min-h-[42px] w-full flex-wrap gap-1.5 rounded-md border border-panel-border bg-panel-bg px-2.5 py-1.5 cursor-text transition focus-within:border-haumea-600"
+        onClick={() => inputRef.current?.focus()}
+      >
+        {value.map((kw) => (
+          <span
+            key={kw}
+            className="inline-flex items-center gap-1 rounded bg-haumea-600/15 px-2 py-0.5 text-xs font-mono text-haumea-300"
+          >
+            {kw}
+            {!disabled && (
+              <button type="button" onClick={() => remove(kw)} className="hover:text-danger transition-colors" tabIndex={-1}>
+                <X className="h-3 w-3" />
+              </button>
+            )}
+          </span>
+        ))}
+        <input
+          ref={inputRef}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={handleKey}
+          onBlur={commit}
+          disabled={disabled}
+          placeholder={value.length === 0 ? 'iphone, celular… (Enter ou vírgula)' : ''}
+          className="min-w-24 flex-1 bg-transparent text-sm text-txt-primary outline-none placeholder:text-txt-muted font-mono"
+        />
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); openImport() }}
+          disabled={disabled}
+          className="inline-flex h-7 items-center rounded border border-panel-border px-2 text-xs font-medium text-txt-muted transition hover:border-panel-hover hover:text-txt-primary disabled:opacity-40"
         >
-          {kw}
-          {!disabled && (
-            <button type="button" onClick={() => remove(kw)} className="hover:text-danger transition-colors" tabIndex={-1}>
-              <X className="h-3 w-3" />
-            </button>
-          )}
-        </span>
-      ))}
-      <input
-        ref={inputRef}
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onKeyDown={handleKey}
-        onBlur={commit}
-        disabled={disabled}
-        placeholder={value.length === 0 ? 'iphone, celular… (Enter ou vírgula)' : ''}
-        className="min-w-24 flex-1 bg-transparent text-sm text-txt-primary outline-none placeholder:text-txt-muted font-mono"
-      />
-    </div>
+          Importar JSON
+        </button>
+      </div>
+
+      {isImporting && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
+          <div className="w-full max-w-md rounded-lg border border-panel-border bg-panel-surface p-4 shadow-xl">
+            <h3 className="text-sm font-semibold text-txt-primary">Importar palavras-chave</h3>
+            <textarea
+              value={importDraft}
+              onChange={(e) => { setImportDraft(e.target.value); setImportError('') }}
+              className={`${inputCls} mt-3 min-h-32 resize-y`}
+              placeholder='["iphone", "celular", "smartphone"]'
+              autoFocus
+            />
+            {importError && <p className="mt-2 text-sm text-danger">{importError}</p>}
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={closeImport}
+                className="inline-flex h-9 items-center rounded-md border border-panel-border px-3 text-sm text-txt-muted transition hover:border-panel-hover hover:text-txt-primary"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={confirmImport}
+                className="inline-flex h-9 items-center rounded-md bg-haumea-600 px-3 text-sm font-medium text-white transition hover:bg-haumea-500"
+              >
+                Confirmar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   )
 }
 
@@ -162,11 +243,11 @@ function ProductForm({ disabled, initialValue = emptyProduct, submitLabel, onCan
 // ── panel ─────────────────────────────────────────────────────────────────────
 function ProductsPanel({ products, disabled, onAdd, onDelete, onEdit }: ProductsPanelProps) {
   const [isAdding, setIsAdding] = useState(false)
-  const [editingId, setEditingId] = useState<number | null>(null)
+  const [editingId, setEditingId] = useState<number | string | null>(null)
   const [pendingDelete, setPendingDelete] = useState<Product | null>(null)
 
   const handleAdd = (p: ProductPayload) => { onAdd(p); setIsAdding(false) }
-  const handleEdit = (id: number, p: ProductPayload) => { onEdit(id, p); setEditingId(null) }
+  const handleEdit = (id: number | string, p: ProductPayload) => { onEdit(id, p); setEditingId(null) }
 
   return (
     <section className="space-y-5">

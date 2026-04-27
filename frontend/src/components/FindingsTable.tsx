@@ -6,7 +6,7 @@ import type { Finding } from '../types'
 
 type FindingsTableProps = {
   findings: Finding[]
-  onDelete?: (id: number) => void
+  onDelete?: (id: number | string) => void
   onClearAll?: () => void
 }
 

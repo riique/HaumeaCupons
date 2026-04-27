@@ -14,6 +14,7 @@ dependencies = [
     "pydantic",
     "httpx",
     "pytest",
+    "firebase-admin",
 ]
 
 [tool.pytest.ini_options]
@@ -21,4 +22,4 @@ python_files = ["test_*.py"]
 asyncio_default_fixture_loop_scope = "function"
 
 [tool.setuptools]
-py-modules = ["app", "config", "main", "storage", "verifier"]
+py-modules = ["app", "config", "firebase_setup", "main", "storage", "verifier"]

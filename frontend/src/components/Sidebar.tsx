@@ -1,4 +1,4 @@
-import { Activity, BarChart3, Menu, MessageSquare, Package, Radio, TerminalSquare, X } from 'lucide-react'
+import { Activity, BarChart3, Menu, MessageSquare, Package, Radio, X } from 'lucide-react'
 import { useState } from 'react'
 import type { Tab } from '../types'
 
@@ -17,7 +17,6 @@ const nav: { key: Tab; label: string; icon: typeof Activity }[] = [
   { key: 'products', label: 'Produtos', icon: Package },
   { key: 'groups', label: 'Grupos', icon: MessageSquare },
   { key: 'findings', label: 'Alertas', icon: Radio },
-  { key: 'logs', label: 'Logs do Bot', icon: TerminalSquare },
 ]
 
 function Sidebar({ active, onChange, counts }: SidebarProps) {

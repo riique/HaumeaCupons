@@ -1,13 +1,25 @@
+import { LogOut } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 
 import ChatGroupsPanel from './components/ChatGroupsPanel'
 import FindingsTable from './components/FindingsTable'
-import LogsPanel from './components/LogsPanel'
 import Overview from './components/Overview'
 import ProductsPanel from './components/ProductsPanel'
 import Sidebar from './components/Sidebar'
-import { jsonRequest, requestJson } from './api'
-import type { ApiState, FindingsPage, Product, ProductPayload, Tab } from './types'
+import {
+  addProduct as addProductToFirestore,
+  clearAllFindings,
+  deleteFinding as deleteFindingFromFirestore,
+  deleteProduct as deleteProductFromFirestore,
+  fetchDashboardState,
+  fetchFindings,
+  saveChatGroups as saveChatGroupsToFirestore,
+  updateProduct as updateProductInFirestore,
+} from './api'
+import { useAuth } from './contexts/AuthContext'
+import Login from './pages/Login'
+import Register from './pages/Register'
+import type { ApiState, ProductPayload, Tab } from './types'
 
 const emptyState: ApiState = {
   products: [],
@@ -27,22 +39,34 @@ function LoadingState() {
         aria-hidden="true"
       />
       <p className="text-sm text-txt-muted">Carregando dados...</p>
-      <p className="text-2xs text-txt-muted">Verifique se o backend está rodando na porta 8000</p>
     </div>
   )
 }
 
 function App() {
+  const { user, loading: authLoading, ready: authReady, logout } = useAuth()
   const [state, setState] = useState<ApiState>(emptyState)
   const [isLoading, setIsLoading] = useState(true)
   const [isMutating, setIsMutating] = useState(false)
   const [error, setError] = useState('')
   const [tab, setTab] = useState<Tab>('overview')
+  const [path, setPath] = useState(window.location.pathname)
+
+  const navigate = useCallback((nextPath: string) => {
+    window.history.pushState({}, '', nextPath)
+    setPath(nextPath)
+  }, [])
+
+  useEffect(() => {
+    const updatePath = () => setPath(window.location.pathname)
+    window.addEventListener('popstate', updatePath)
+    return () => window.removeEventListener('popstate', updatePath)
+  }, [])
 
   const loadState = useCallback(async (showLoading = false) => {
     if (showLoading) setIsLoading(true)
     try {
-      const next = await requestJson<ApiState>('/api/state')
+      const next = await fetchDashboardState()
       setState(next)
       setError('')
     } catch (err) {
@@ -54,8 +78,8 @@ function App() {
 
   const refreshFindings = useCallback(async () => {
     try {
-      const page = await requestJson<FindingsPage>('/api/findings?limit=200')
-      setState((c) => ({ ...c, findings: page.findings }))
+      const findings = await fetchFindings(200)
+      setState((c) => ({ ...c, findings }))
       setError('')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Falha ao atualizar alertas.')
@@ -78,26 +102,61 @@ function App() {
   )
 
   useEffect(() => {
+    if (!user) return
     void loadState(true)
-  }, [loadState])
+  }, [loadState, user])
 
   useEffect(() => {
+    if (!user) return undefined
     const id = window.setInterval(() => void refreshFindings(), 30_000)
     return () => window.clearInterval(id)
-  }, [refreshFindings])
+  }, [refreshFindings, user])
+
+  useEffect(() => {
+    if (user && (path === '/login' || path === '/register')) {
+      navigate('/')
+    }
+  }, [navigate, path, user])
 
   const addProduct = (p: ProductPayload) =>
-    mutate(() => requestJson<Product>('/api/products', jsonRequest('POST', p)))
-  const editProduct = (id: number, p: ProductPayload) =>
-    mutate(() => requestJson<Product>(`/api/products/${id}`, jsonRequest('PUT', p)))
-  const deleteProduct = (id: number) =>
-    mutate(() => requestJson<void>(`/api/products/${id}`, { method: 'DELETE' }))
+    mutate(() => addProductToFirestore(p))
+  const editProduct = (id: number | string, p: ProductPayload) =>
+    mutate(() => updateProductInFirestore(id, p))
+  const deleteProduct = (id: number | string) =>
+    mutate(() => deleteProductFromFirestore(id))
   const saveChatGroups = (g: string) =>
-    mutate(() => requestJson('/api/chat-groups', jsonRequest('PUT', { chat_groups: g })))
-  const deleteFinding = (id: number) =>
-    mutate(() => requestJson<void>(`/api/findings/${id}`, { method: 'DELETE' }))
+    mutate(() => saveChatGroupsToFirestore(g))
+  const deleteFinding = (id: number | string) =>
+    mutate(() => deleteFindingFromFirestore(id))
   const clearFindings = () =>
-    mutate(() => requestJson<void>('/api/findings', { method: 'DELETE' }))
+    mutate(() => clearAllFindings())
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-panel-bg font-body text-txt-primary antialiased">
+        <LoadingState />
+      </div>
+    )
+  }
+
+  if (!authReady) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-panel-bg px-4 text-txt-primary">
+        <section className="w-full max-w-md rounded-lg border border-panel-border bg-panel-surface p-6">
+          <h1 className="text-lg font-semibold tracking-tight">Firebase não configurado</h1>
+          <p className="mt-2 text-sm text-txt-muted">
+            Defina as variáveis Vite `VITE_FIREBASE_*` antes de compilar o frontend.
+          </p>
+        </section>
+      </main>
+    )
+  }
+
+  if (!user) {
+    return path === '/register'
+      ? <Register onLogin={() => navigate('/login')} />
+      : <Login onRegister={() => navigate('/register')} />
+  }
 
   const groupCount = state.chat_groups === 'all'
     ? ('all' as const)
@@ -137,8 +196,6 @@ function App() {
             onClearAll={clearFindings}
           />
         )
-      case 'logs':
-        return <LogsPanel />
       default:
         return null
     }
@@ -157,6 +214,21 @@ function App() {
       />
 
       <main className="min-h-screen p-6 pt-16 lg:ml-56 lg:p-8 lg:pt-8">
+        <header className="mb-6 flex items-center justify-end gap-3">
+          <div className="min-w-0 text-right">
+            <p className="truncate text-sm font-medium text-txt-primary">{user.displayName || user.email}</p>
+            <p className="truncate text-2xs text-txt-muted">{user.email}</p>
+          </div>
+          <button
+            className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-panel-border text-txt-muted transition hover:border-danger/50 hover:text-danger"
+            type="button"
+            onClick={() => void logout()}
+            title="Sair"
+            aria-label="Sair"
+          >
+            <LogOut className="h-4 w-4" />
+          </button>
+        </header>
         {error && (
           <div className="mb-6 rounded-lg border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger" role="alert">
             {error}

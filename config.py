@@ -9,6 +9,13 @@ from typing import Any
 
 from dotenv import load_dotenv
 
+try:
+    from firebase_setup import get_chat_groups as firestore_get_chat_groups
+    from firebase_setup import list_products as firestore_list_products
+except Exception:  # pragma: no cover - local JSON fallback must keep the bot bootable
+    firestore_get_chat_groups = None
+    firestore_list_products = None
+
 
 def _split_csv(value: str) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
@@ -129,7 +136,7 @@ def _parse_products(raw: Any) -> list[Product]:
         if not kws:
             continue
         try:
-            max_price = float(item.get("max_price", 0))
+            max_price = float(item.get("max_price", item.get("maxPrice", 0)))
         except (TypeError, ValueError) as exc:
             raise RuntimeError(f"Invalid max_price for product {kws!r}") from exc
         if max_price < 0:
@@ -174,10 +181,12 @@ def load_settings() -> Settings:
     except ValueError as exc:
         raise RuntimeError("API_ID must be an integer") from exc
 
-    products_raw = data.get("products")
+    firestore_products = firestore_list_products() if firestore_list_products is not None else None
+    products_raw = firestore_products or data.get("products")
     products = _parse_products(products_raw or DEFAULT_DATA["products"])
 
-    chat_groups_raw = data.get("chat_groups")
+    firestore_chat_groups = firestore_get_chat_groups() if firestore_get_chat_groups is not None else None
+    chat_groups_raw = firestore_chat_groups if firestore_chat_groups is not None else data.get("chat_groups")
     if chat_groups_raw is None and chat_groups_env:
         chat_groups_raw = chat_groups_env
     chat_groups = _parse_chat_groups(chat_groups_raw if chat_groups_raw is not None else DEFAULT_DATA["chat_groups"])
