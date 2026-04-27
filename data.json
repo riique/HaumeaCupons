@@ -6,7 +6,7 @@
         "celular"
       ],
       "max_price": 10000.0,
-      "notify_email": "rikki@email.com"
+      "notify_email": "henriquelenz16@gmail.com"
     },
     {
       "id": 1,
@@ -14,7 +14,7 @@
         "iphone"
       ],
       "max_price": 10000.0,
-      "notify_email": "rikki@email.com"
+      "notify_email": "henriquelenz16@gmail.com"
     },
     {
       "id": 2,
@@ -23,7 +23,7 @@
         "samsumg"
       ],
       "max_price": 10000.0,
-      "notify_email": "rikki@email.com"
+      "notify_email": "henriquelenz16@gmail.com"
     },
     {
       "id": 3,
@@ -31,7 +31,7 @@
         "whey"
       ],
       "max_price": 100000.0,
-      "notify_email": "rikki@email.com"
+      "notify_email": "henriquelenz16@gmail.com"
     },
     {
       "id": 4,
@@ -39,7 +39,7 @@
         "gabinete"
       ],
       "max_price": 1231231.0,
-      "notify_email": "rikki@email.com"
+      "notify_email": "henriquelenz16@gmail.com"
     },
     {
       "id": 5,
@@ -47,7 +47,7 @@
         "monitor"
       ],
       "max_price": 12312.0,
-      "notify_email": "rikki@email.com"
+      "notify_email": "henriquelenz16@gmail.com"
     }
   ],
   "chat_groups": "all"
