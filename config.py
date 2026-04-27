@@ -142,7 +142,7 @@ def _parse_products(raw: Any) -> list[Product]:
             raise RuntimeError(f"Invalid max_price for product {kws!r}") from exc
         if max_price < 0:
             raise RuntimeError(f"max_price must be >= 0 for product {kws!r}")
-        notify_email = str(item.get("notify_email", "")).strip()
+        notify_email = str(item.get("notify_email", item.get("created_by", ""))).strip()
         products.append(Product(keywords=kws, max_price=max_price, notify_email=notify_email))
 
     if not products:
@@ -184,7 +184,14 @@ def load_settings() -> Settings:
         raise RuntimeError("API_ID must be an integer") from exc
 
     firestore_products = firestore_list_products() if firestore_list_products is not None else None
-    products_raw = firestore_products or data.get("products")
+    if firestore_products is not None:
+        products_raw = [
+            product
+            for product in firestore_products
+            if not isinstance(product, dict) or product.get("active", True)
+        ]
+    else:
+        products_raw = data.get("products")
     products = _parse_products(products_raw or DEFAULT_DATA["products"])
 
     firestore_chat_groups = firestore_get_chat_groups() if firestore_get_chat_groups is not None else None
