@@ -1,27 +1,28 @@
 import { Activity, BarChart3, Menu, Package, Radio, X } from 'lucide-react'
 import { useState } from 'react'
-import type { Tab } from '../types'
+import { useLocation, useNavigate } from 'react-router-dom'
 
 type SidebarProps = {
-  active: Tab
-  onChange: (tab: Tab) => void
   counts: {
     products: number
     findings: number
   }
 }
 
-const nav: { key: Tab; label: string; icon: typeof Activity }[] = [
-  { key: 'overview', label: 'Visão Geral', icon: BarChart3 },
-  { key: 'products', label: 'Produtos', icon: Package },
-  { key: 'findings', label: 'Alertas', icon: Radio },
+const nav: { path: string; label: string; icon: typeof Activity }[] = [
+  { path: '/geral', label: 'Visão Geral', icon: BarChart3 },
+  { path: '/produtos', label: 'Produtos', icon: Package },
+  { path: '/alertas', label: 'Alertas', icon: Radio },
 ]
 
-function Sidebar({ active, onChange, counts }: SidebarProps) {
+function Sidebar({ counts }: SidebarProps) {
   const [open, setOpen] = useState(false)
+  const location = useLocation()
+  const navigate = useNavigate()
+  const pathname = location.pathname.replace(/\/+$/, '') || '/'
 
-  const handleNav = (key: Tab) => {
-    onChange(key)
+  const handleNav = (path: string) => {
+    navigate(path)
     setOpen(false)
   }
 
@@ -73,13 +74,16 @@ function Sidebar({ active, onChange, counts }: SidebarProps) {
         </div>
 
         <nav className="flex-1 space-y-0.5 px-3">
-          {nav.map(({ key, label, icon: Icon }) => {
-            const isActive = active === key
+          {nav.map(({ path, label, icon: Icon }) => {
+            const isActive = path === '/geral'
+              ? pathname === '/' || pathname === '/geral'
+              : pathname === path
             return (
               <button
-                key={key}
+                key={path}
                 type="button"
-                onClick={() => handleNav(key)}
+                onClick={() => handleNav(path)}
+                aria-current={isActive ? 'page' : undefined}
                 className={`group flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-sm transition-colors ${
                   isActive
                     ? 'bg-haumea-600/10 text-haumea-400 font-medium'

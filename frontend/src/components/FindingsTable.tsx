@@ -1,4 +1,4 @@
-import { ExternalLink, Trash2 } from 'lucide-react'
+import { ExternalLink, FileText, Trash2, X } from 'lucide-react'
 import { useState } from 'react'
 
 import ConfirmDialog from './ConfirmDialog'
@@ -33,6 +33,8 @@ function formatPrice(value: Finding['price_found']) {
 function FindingsTable({ findings, onDelete, onClearAll }: FindingsTableProps) {
   const [pendingDelete, setPendingDelete] = useState<Finding | null>(null)
   const [pendingClear, setPendingClear] = useState(false)
+  const [originalFinding, setOriginalFinding] = useState<Finding | null>(null)
+  const originalMessage = originalFinding?.raw_message?.trim()
 
   return (
     <section className="space-y-5">
@@ -59,7 +61,7 @@ function FindingsTable({ findings, onDelete, onClearAll }: FindingsTableProps) {
         </p>
       ) : (
         <div className="overflow-auto rounded-lg border border-panel-border">
-          <table className="min-w-[800px] w-full text-left text-sm">
+          <table className="min-w-[960px] w-full text-left text-sm">
             <thead>
               <tr className="border-b border-panel-border bg-panel-surface">
                 <th className="px-4 py-3 text-2xs font-semibold uppercase tracking-wide text-txt-muted">Data</th>
@@ -69,6 +71,7 @@ function FindingsTable({ findings, onDelete, onClearAll }: FindingsTableProps) {
                 <th className="px-4 py-3 text-2xs font-semibold uppercase tracking-wide text-txt-muted">Link</th>
                 <th className="px-4 py-3 text-2xs font-semibold uppercase tracking-wide text-txt-muted">Preço</th>
                 <th className="px-4 py-3 text-2xs font-semibold uppercase tracking-wide text-txt-muted">Status</th>
+                <th className="px-4 py-3 text-2xs font-semibold uppercase tracking-wide text-txt-muted">Original</th>
                 <th className="w-12 px-4 py-3" />
               </tr>
             </thead>
@@ -142,6 +145,20 @@ function FindingsTable({ findings, onDelete, onClearAll }: FindingsTableProps) {
                     </span>
                   </td>
                   <td className="px-4 py-3">
+                    {f.raw_message?.trim() ? (
+                      <button
+                        className="inline-flex h-8 items-center gap-1.5 rounded-md border border-panel-border px-2.5 text-2xs font-medium text-txt-secondary transition hover:bg-panel-hover hover:text-txt-primary"
+                        type="button"
+                        onClick={() => setOriginalFinding(f)}
+                      >
+                        <FileText className="h-3.5 w-3.5" />
+                        Ver original
+                      </button>
+                    ) : (
+                      <span className="text-2xs text-txt-muted">—</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3">
                     {onDelete && (
                       <button
                         className="inline-flex h-7 w-7 items-center justify-center rounded-md text-txt-muted transition hover:bg-panel-hover hover:text-danger"
@@ -176,6 +193,46 @@ function FindingsTable({ findings, onDelete, onClearAll }: FindingsTableProps) {
           onCancel={() => setPendingClear(false)}
           onConfirm={() => { onClearAll(); setPendingClear(false) }}
         />
+      )}
+
+      {originalFinding && originalMessage && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4"
+          onClick={() => setOriginalFinding(null)}
+        >
+          <div
+            className="w-full max-w-2xl rounded-lg border border-panel-border bg-panel-surface p-5"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="original-message-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <span className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-haumea-600/10 text-haumea-400">
+                  <FileText className="h-5 w-5" />
+                </span>
+                <h3 id="original-message-title" className="text-base font-semibold text-txt-primary">
+                  Mensagem original
+                </h3>
+              </div>
+              <button
+                className="inline-flex h-8 w-8 items-center justify-center rounded-md text-txt-muted transition hover:bg-panel-hover hover:text-txt-primary"
+                type="button"
+                onClick={() => setOriginalFinding(null)}
+                title="Fechar"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="mt-4 max-h-[60vh] overflow-auto rounded-md border border-panel-border bg-panel-bg p-4">
+              <p className="whitespace-pre-wrap break-words text-sm leading-6 text-txt-secondary">
+                {originalFinding.raw_message}
+              </p>
+            </div>
+          </div>
+        </div>
       )}
     </section>
   )

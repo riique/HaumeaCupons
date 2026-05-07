@@ -171,6 +171,7 @@ def save_finding(finding: dict[str, Any], *, user_id: str = "bot") -> str | None
         "links": list(finding.get("links") or []),
         "sourceChatId": str(finding.get("source_chat_id") or ""),
         "sourceMessageId": str(finding.get("source_message_id") or ""),
+        "rawMessage": finding.get("raw_message", ""),
         "userId": user_id,
         "updatedAt": _utc_now(),
     }

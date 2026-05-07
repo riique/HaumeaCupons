@@ -324,6 +324,7 @@ def build_handler(settings_store: Settings | SettingsStore):
             "links": all_links,
             "source_chat_id": source_chat_id,
             "source_message_id": source_message_id,
+            "raw_message": text,
         }
         add_finding(
             timestamp=timestamp,

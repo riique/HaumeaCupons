@@ -21,6 +21,7 @@ export type Finding = {
   links: string[]
   source_chat_id?: string
   source_message_id?: string
+  raw_message?: string
   user_id?: string
 }
 
@@ -34,5 +35,3 @@ export type FindingsPage = {
   limit: number
   offset: number
 }
-
-export type Tab = 'overview' | 'products' | 'findings'

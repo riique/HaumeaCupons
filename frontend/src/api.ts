@@ -59,6 +59,7 @@ function findingFromDoc(docSnap: QueryDocumentSnapshot<DocumentData>): Finding {
     links: Array.isArray(data.links) ? data.links.map(String) : [],
     source_chat_id: String(data.sourceChatId ?? data.source_chat_id ?? ''),
     source_message_id: String(data.sourceMessageId ?? data.source_message_id ?? ''),
+    raw_message: String(data.rawMessage ?? data.raw_message ?? ''),
     user_id: String(data.userId ?? data.user_id ?? ''),
   }
 }

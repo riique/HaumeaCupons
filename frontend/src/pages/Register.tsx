@@ -2,6 +2,7 @@ import { createUserWithEmailAndPassword, updateProfile } from 'firebase/auth'
 import { doc, serverTimestamp, setDoc } from 'firebase/firestore'
 import { UserPlus } from 'lucide-react'
 import { type FormEvent, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 
 import { auth, db } from '../firebase'
 
@@ -13,6 +14,7 @@ const inputCls =
   'w-full rounded-md border border-panel-border bg-panel-bg px-3 py-2.5 text-sm text-txt-primary outline-none transition placeholder:text-txt-muted focus:border-haumea-600'
 
 function Register({ onLogin }: RegisterProps) {
+  const navigate = useNavigate()
   const [displayName, setDisplayName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -41,8 +43,7 @@ function Register({ onLogin }: RegisterProps) {
         createdAt: serverTimestamp(),
         lastLoginAt: serverTimestamp(),
       })
-      window.history.pushState({}, '', '/')
-      window.dispatchEvent(new PopStateEvent('popstate'))
+      navigate('/geral', { replace: true })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Falha ao criar conta.')
     } finally {
