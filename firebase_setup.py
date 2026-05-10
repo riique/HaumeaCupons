@@ -86,6 +86,8 @@ def product_from_doc(doc: Any, fallback_index: int = 0) -> dict[str, Any]:
         "max_price": float(data.get("maxPrice", data.get("max_price", 0)) or 0),
         "active": bool(data.get("active", True)),
         "created_by": data.get("createdBy", data.get("created_by", "")),
+        "notify_hermes": data.get("notifyHermes", data.get("notify_hermes", False)),
+        "notify_telegram": data.get("notifyTelegram", data.get("notify_telegram", False)),
         "created_at": _doc_timestamp(data.get("createdAt", data.get("created_at", ""))),
         "_fallback_index": fallback_index,
     }

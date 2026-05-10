@@ -25,7 +25,15 @@ def _env_bool(name: str, default: bool = False) -> bool:
     value = os.getenv(name)
     if value is None:
         return default
-    return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return _env_bool_value(value)
+
+
+def _env_bool_value(value: Any, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
 def _env_int(name: str, default: int) -> int:
@@ -43,6 +51,8 @@ class Product:
     keywords: list[str]
     max_price: float
     notify_email: str = ""
+    notify_hermes: bool = False
+    notify_hermes_explicit: bool = False
 
     @property
     def primary_keyword(self) -> str:
@@ -92,6 +102,12 @@ def _initial_data_from_env(chat_groups: str | None) -> dict[str, Any]:
     data = _default_data()
     if chat_groups:
         data["chat_groups"] = _parse_chat_groups(chat_groups)
+    product_keywords = os.getenv("PRODUCTS_KEYWORDS", "")
+    if product_keywords:
+        data["products"] = [
+            {"keywords": [keyword], "max_price": 0}
+            for keyword in _split_csv(product_keywords)
+        ]
     return data
 
 
@@ -135,7 +151,25 @@ def _parse_products(raw: Any) -> list[Product]:
         if max_price < 0:
             raise RuntimeError(f"max_price must be >= 0 for product {kws!r}")
         notify_email = str(item.get("notify_email", item.get("created_by", ""))).strip()
-        products.append(Product(keywords=kws, max_price=max_price, notify_email=notify_email))
+        notify_key = next(
+            (
+                key
+                for key in ("notify_hermes", "notifyHermes", "notify_telegram", "notifyTelegram")
+                if key in item
+            ),
+            "",
+        )
+        notify_explicit = bool(notify_key)
+        notify_hermes = _env_bool_value(item.get(notify_key)) if notify_explicit else False
+        products.append(
+            Product(
+                keywords=kws,
+                max_price=max_price,
+                notify_email=notify_email,
+                notify_hermes=notify_hermes,
+                notify_hermes_explicit=notify_explicit,
+            )
+        )
 
     return products
 
@@ -173,9 +207,10 @@ def load_settings() -> Settings:
         raise RuntimeError("API_ID must be an integer") from exc
 
     firestore_products = firestore_list_products() if firestore_list_products is not None else None
+    products_source = firestore_products if firestore_products is not None else data.get("products", [])
     products_raw = [
         product
-        for product in (firestore_products or [])
+        for product in (products_source or [])
         if not isinstance(product, dict) or product.get("active", True)
     ]
     products = _parse_products(products_raw)

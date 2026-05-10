@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import json
 import logging
 import os
 import time
@@ -13,6 +12,7 @@ from typing import Any
 
 from config import DATA_FILE, Settings, load_settings
 from firebase_setup import save_finding as firestore_save_finding
+from hermes_notify import notify_hermes_finding
 from storage import add_finding, finding_exists, init_findings_db, migrate_alerts_jsonl
 from verifier import VerificationResult, extract_coupons, extract_links, match_price_range, verify_links
 
@@ -102,6 +102,52 @@ def build_message_hash(chat_id: int | str, text: str, links: list[str], coupons:
     normalized_links = "|".join(sorted(link.strip().lower() for link in links))
     normalized_coupons = "|".join(sorted(coupon.strip().upper() for coupon in coupons))
     return _hash_value(f"{chat_id}\n{normalized_text}\n{normalized_links}\n{normalized_coupons}")
+
+
+def _split_env_set(name: str) -> set[str]:
+    raw = os.getenv(name, "")
+    return {item.strip().lower() for item in raw.split(",") if item.strip()}
+
+
+def _product_notify_enabled(product: Any) -> bool:
+    if getattr(product, "notify_hermes_explicit", False):
+        return bool(getattr(product, "notify_hermes", False))
+
+    notify_email = str(getattr(product, "notify_email", "") or "").strip().lower()
+    if not notify_email:
+        return False
+    return notify_email in _split_env_set("HAUMEA_NOTIFY_EMAIL_ALLOWLIST")
+
+
+def _price_text(price: float | None) -> str:
+    if price is None:
+        return ""
+    return f"R$ {price:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def build_hermes_payload(
+    *,
+    message_hash: str,
+    product: str,
+    price: float | None,
+    url: str,
+    source: str,
+    timestamp: str,
+    coupons: list[str],
+    links: list[str],
+) -> dict[str, Any]:
+    return {
+        "id": message_hash,
+        "product": product,
+        "price": price,
+        "price_text": _price_text(price),
+        "url": url,
+        "source": source,
+        "timestamp": timestamp,
+        "coupon_summary": ", ".join(coupons) if coupons else "sem cupom",
+        "coupons": coupons,
+        "links": links,
+    }
 
 
 class DedupeCache:
@@ -347,29 +393,26 @@ def build_handler(settings_store: Settings | SettingsStore):
             except Exception:
                 logging.exception("Falha ao sincronizar finding com Firestore")
 
-        # WhatsApp notification - write to Hermes cron queue
         if best_kw and settings.products:
             for product in settings.products:
-                if best_kw in product.keywords and product.notify_email:
-                    notif_dir = Path("~/.hermes/cron/notifications/incoming").expanduser()
-                    notif_dir.mkdir(parents=True, exist_ok=True)
-                    notif_payload = {
-                        "id": message_hash,
-                        "product": best_kw,
-                        "price": best_price,
-                        "url": all_links[0] if all_links else "",
-                        "source": chat_title,
-                        "timestamp": timestamp,
-                        "notify_email": product.notify_email,
-                    }
-                    notif_path = notif_dir / f"{message_hash}.json"
-                    with open(notif_path.with_suffix(".tmp"), "w", encoding="utf-8") as file:
-                        json.dump(notif_payload, file, indent=2)
-                    notif_path.with_suffix(".tmp").replace(notif_path)
-                    logging.info("   Notificação WhatsApp enfileirada para %s", product.notify_email)
+                if best_kw in product.keywords and _product_notify_enabled(product):
+                    hermes_payload = build_hermes_payload(
+                        message_hash=message_hash,
+                        product=best_kw,
+                        price=best_price,
+                        url=all_links[0] if all_links else "",
+                        source=chat_title,
+                        timestamp=timestamp,
+                        coupons=coupons,
+                        links=all_links,
+                    )
+                    try:
+                        await notify_hermes_finding(hermes_payload, request_id=message_hash)
+                    except Exception:
+                        logging.exception("Falha inesperada ao notificar Hermes; finding ja foi salvo")
                     break
 
-        logging.info("  Finding salvo no banco; envio Telegram desativado")
+        logging.info("  Finding salvo no banco")
 
     return handler
 
@@ -407,7 +450,7 @@ async def run() -> None:
     kw_count = len(settings.keywords)
     prod_count = len(settings.products)
     logging.info("✓ Bot iniciado — monitorando %s | %d produto(s) | %d palavra(s)-chave", group_str, prod_count, kw_count)
-    logging.info("Envio de mensagens Telegram desativado; findings serão salvos apenas no banco/dashboard")
+    logging.info("Envio Telegram direto desativado; alertas Hermes usam webhook quando habilitados por produto")
     for p in settings.products:
         logging.info("  • [%.2f] %s", p.max_price, ", ".join(p.keywords))
     try:
