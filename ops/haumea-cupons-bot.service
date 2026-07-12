@@ -1,0 +1,28 @@
+[Unit]
+Description=HaumeaCupons Telegram Bot
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+WorkingDirectory=/home/henriquelenz/Haumea/HaumeaCupons
+EnvironmentFile=/home/henriquelenz/Haumea/HaumeaCupons/.env
+Environment=PYTHONUNBUFFERED=1
+Environment=FIRESTORE_SYNC_FINDINGS=true
+Environment=FIRESTORE_SYNC_TIMEOUT_SECONDS=8
+ExecStartPre=/home/henriquelenz/Haumea/HaumeaCupons/.venv/bin/python ops/check_config.py
+ExecStart=/home/henriquelenz/Haumea/HaumeaCupons/.venv/bin/python main.py
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=30
+KillSignal=SIGINT
+SyslogIdentifier=haumea-cupons-bot
+StandardOutput=journal
+StandardError=journal
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

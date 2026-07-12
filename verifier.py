@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import os
 import re
 import socket
+import unicodedata
 from dataclasses import dataclass
 from typing import Iterable, Protocol
 from urllib.parse import urljoin, urlsplit
@@ -27,6 +29,9 @@ MAX_CONCURRENT_VERIFICATIONS = 5
 class ProductLike(Protocol):
     keywords: list[str]
     max_price: float
+    min_price: float | None
+    exclude_terms: list[str] | None
+    merchants: list[str] | None
 
 
 @dataclass(frozen=True)
@@ -92,6 +97,10 @@ def _normalize_price(raw: str) -> float | None:
         return None
 
 
+def normalize_price(raw: str) -> float | None:
+    return _normalize_price(raw)
+
+
 def parse_price(text: str) -> float | None:
     prices = extract_prices(text)
     return prices[0] if prices else None
@@ -107,17 +116,51 @@ def extract_prices(text: str) -> list[float]:
     return prices
 
 
-def match_price_range(text: str, products: Iterable[ProductLike]) -> tuple[float | None, bool, str]:
+def _normalize_search_text(value: str) -> str:
+    ascii_text = unicodedata.normalize("NFKD", value or "").encode("ascii", "ignore").decode("ascii")
+    return re.sub(r"[^a-z0-9]+", " ", ascii_text.lower()).strip()
+
+
+def term_in_text(term: str, text: str) -> bool:
+    normalized_term = _normalize_search_text(term)
+    if not normalized_term:
+        return False
+    normalized_text = f" {_normalize_search_text(text)} "
+    return f" {normalized_term} " in normalized_text
+
+
+def match_product_term(text: str, product: ProductLike) -> str:
+    exclude_terms = getattr(product, "exclude_terms", None) or []
+    if any(term_in_text(term, text) for term in exclude_terms):
+        return ""
+    return next((kw for kw in product.keywords if term_in_text(kw, text)), "")
+
+
+def product_allows_merchant(product: ProductLike, merchant: str = "") -> bool:
+    allowed = [m.lower() for m in (getattr(product, "merchants", None) or []) if str(m).strip()]
+    if not allowed or not merchant:
+        return True
+    return merchant.strip().lower() in allowed
+
+
+def price_in_range(price: float, product: ProductLike) -> bool:
+    min_price = getattr(product, "min_price", None)
+    if min_price is not None and price < float(min_price):
+        return False
+    return price <= float(product.max_price)
+
+
+def match_price_range(text: str, products: Iterable[ProductLike], *, merchant: str = "") -> tuple[float | None, bool, str]:
     prices = extract_prices(text)
     first_price = prices[0] if prices else None
-    lowered = (text or "").lower()
     for product in products:
-        # Match if ANY keyword is found in the text
-        matched_kw = next((kw for kw in product.keywords if kw.lower() in lowered), None)
+        if not product_allows_merchant(product, merchant):
+            continue
+        matched_kw = match_product_term(text, product)
         if not matched_kw:
             continue
         for price in prices:
-            if price <= product.max_price:
+            if price_in_range(price, product):
                 return price, True, matched_kw
     return first_price, False, ""
 
@@ -144,6 +187,14 @@ def _is_blocked_ip(value: str) -> bool:
     )
 
 
+def _env_domain_set(name: str) -> set[str]:
+    return {item.strip().lower().lstrip(".") for item in os.getenv(name, "").split(",") if item.strip()}
+
+
+def _domain_matches(host: str, domains: set[str]) -> bool:
+    return any(host == domain or host.endswith("." + domain) for domain in domains)
+
+
 async def validate_public_url(url: str) -> tuple[bool, str]:
     parsed = urlsplit(url)
     if parsed.scheme.lower() not in {"http", "https"}:
@@ -152,6 +203,12 @@ async def validate_public_url(url: str) -> tuple[bool, str]:
         return False, "missing URL host"
 
     host = parsed.hostname.strip().lower()
+    deny_domains = _env_domain_set("VERIFY_LINK_DENYLIST_DOMAINS")
+    allow_domains = _env_domain_set("VERIFY_LINK_ALLOWLIST_DOMAINS")
+    if deny_domains and _domain_matches(host, deny_domains):
+        return False, "blocked denied domain"
+    if allow_domains and not _domain_matches(host, allow_domains):
+        return False, "blocked domain outside allowlist"
     if host == "localhost" or host.endswith(".localhost"):
         return False, "blocked local host"
     if _is_blocked_ip(host):
@@ -250,8 +307,11 @@ async def verify_link(
         page_text = soup.get_text(" ", strip=True)[:120_000]
 
     product_list = list(products)
-    lower_text = page_text.lower()
-    matched_keywords = [kw for product in product_list for kw in product.keywords if kw.lower() in lower_text]
+    matched_keywords = [
+        matched
+        for product in product_list
+        if (matched := match_product_term(page_text, product))
+    ]
     price, price_ok, product_keyword = match_price_range(page_text, product_list)
     status_ok = response_status is not None and 200 <= response_status < 400
     ok = status_ok and bool(matched_keywords or title or page_text)

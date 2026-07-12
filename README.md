@@ -1,6 +1,6 @@
 # HaumeaCupons
 
-Bot Telethon/FastAPI para monitorar mensagens do Telegram, detectar ofertas por palavras-chave, validar links/precos, registrar findings em SQLite e exibir tudo em um dashboard React.
+Bot Telethon/FastAPI para monitorar mensagens do Telegram, detectar ofertas por sinais estruturais ou regras legadas por palavra-chave, validar links/precos, registrar findings em SQLite/Firestore e exibir tudo em um dashboard React.
 
 ## Modo seguro primeiro
 
@@ -45,6 +45,11 @@ python main.py
 - `CHAT_GROUPS`: grupos permitidos. Use IDs/usernames separados por virgula.
 - `ALLOW_ALL_CHATS`: precisa ser `true` para permitir `chat_groups=all` em conta de usuario.
 - `DEDUPE_TTL_SECONDS`: janela de dedupe em memoria. Padrao: `1800`.
+- `SIGNAL_ONLY_MAX_PRICE`: teto global opcional para autoaprovar ofertas sem regra. Padrao: `0`, que envia para revisao.
+- `STORE_REVIEW_FINDINGS`: quando `true`, tambem grava revisoes como findings. Padrao: `false`; em producao, deixe falso para nao poluir alertas.
+- `FIRESTORE_SYNC_FINDINGS`: sincroniza findings do bot para Firestore via Admin SDK quando `true`.
+- `FIRESTORE_SYNC_TIMEOUT_SECONDS`: timeout da sincronizacao assíncrona com Firestore. Padrao: `8`.
+- `VERIFY_LINK_ALLOWLIST_DOMAINS` / `VERIFY_LINK_DENYLIST_DOMAINS`: filtros opcionais de dominios para verificacao HTTP.
 - `DASHBOARD_API_KEY`: chave exigida em `/api/*` quando definida.
 
 ## Dados
@@ -56,7 +61,9 @@ Produtos e grupos ficam em `data.json`:
   "products": [
     {
       "id": 0,
+      "name": "iPhone",
       "keywords": ["iphone", "smartphone apple"],
+      "exclude_terms": ["capinha", "pelicula"],
       "max_price": 4500.0
     }
   ],
@@ -66,6 +73,38 @@ Produtos e grupos ficam em `data.json`:
 
 `chat_groups` aceita uma lista de IDs/usernames ou `"all"`. Para conta de usuario, `"all"` so inicia com `ALLOW_ALL_CHATS=true`.
 
+## Deteccao de ofertas
+
+O bot nao depende mais de `keywords` para transformar uma mensagem em candidata. O modo padrao e `DETECTION_MODE=hybrid`:
+
+- `keywords`: comportamento legado, exige keyword cadastrada.
+- `signals`: ignora keywords e captura ofertas por sinais fortes: titulo de produto, preco contextual, marketplace conhecido, links e cupom.
+- `hybrid`: aceita regra legada ou sinais fortes de oferta. Quando uma regra cadastrada bate, o `max_price` continua sendo aplicado. Quando nao ha regra, a oferta vira `review` por padrao; so vira `approved` automaticamente se `SIGNAL_ONLY_MAX_PRICE` estiver definido e o preco extraido estiver abaixo dele.
+
+`keywords` segue aceito por compatibilidade, mas hoje representa termos de match de uma regra de preco. O modelo novo aceita tambem `name`, `min_price`, `exclude_terms`, `merchants`, `category` e `auto_approve`.
+
+Variaveis relevantes:
+
+- `MIN_OFFER_CONFIDENCE`: minimo do classificador de oferta. Padrao: `0.62`.
+- `MESSAGE_AUDIT_ENABLED`: registra decisoes em `message_events` no SQLite. Padrao: `true`.
+- `STORE_RAW_MESSAGES`: grava texto bruto nos findings/auditoria. Padrao: `false`; mantenha assim em producao salvo necessidade operacional.
+
+Mensagens de cupom puro, como `R$100 OFF acima de R$999`, sao penalizadas para evitar tratar desconto/minimo de compra como preco de produto.
+
+## Segurança do Firestore
+
+O frontend publicado no Firebase Hosting le o Firestore diretamente. Nao ha Cloud Run nem Cloud Functions neste projeto.
+
+As regras em `firestore.rules` permitem leitura para usuarios autenticados, mas escrita/delecao de regras e findings apenas para administradores. Um administrador e representado por um documento `admins/{uid}` criado via Firebase Console ou Admin SDK. O bot usa service account/Admin SDK e nao depende dessas rules para gravar findings.
+
+Para conceder admin sem Cloud Functions:
+
+```bash
+python ops/grant_admin.py --email pessoa@exemplo.com
+# ou
+python ops/grant_admin.py --uid UID_DO_FIREBASE_AUTH
+```
+
 ## Dashboard
 
 ```bash
@@ -74,22 +113,24 @@ uvicorn app:app --host 127.0.0.1 --port 8000
 
 Abra `http://127.0.0.1:8000`.
 
-Em producao, gere o build do frontend antes de subir o FastAPI:
+Em producao, o frontend vai para Firebase Hosting e le o Firestore diretamente:
 
 ```bash
 cd frontend
 npm install
 npm run build
+cd ..
+firebase deploy --only hosting,firestore:rules
 ```
 
-Para expor via Cloudflare Tunnel:
+O FastAPI continua util como dashboard/API local de manutencao. Para expor via Cloudflare Tunnel:
 
 ```bash
 export DASHBOARD_API_KEY="uma-chave-forte"
 ./tunnel.sh
 ```
 
-O frontend pedira a chave quando a API responder 401.
+O frontend publicado no Firebase Hosting nao usa essa API local; ele depende de Firebase Auth + Firestore Rules.
 
 ## Testes
 

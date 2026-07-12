@@ -12,8 +12,10 @@ Nao rode conta de usuario com `chat_groups=all` como configuracao normal. O codi
 2. Se usar `PHONE`, configure uma lista explicita em `chat_groups`.
 3. Remova palavras-chave genericas como `cupom` e `desconto` quando elas nao forem produtos reais.
 4. Defina `DASHBOARD_API_KEY` antes de expor o painel.
-5. Verifique `python -m pytest -q` antes de rodar mudancas.
-6. Acompanhe logs nos primeiros minutos e pause se aparecer erro repetido de conexao, login ou verificacao HTTP.
+5. Se usar Firebase Hosting, crie o documento `admins/{uid}` para os usuarios que podem editar regras.
+6. Mantenha `SIGNAL_ONLY_MAX_PRICE=0` em producao ate revisar a qualidade dos falsos positivos; ofertas sem regra entram como `review`.
+7. Verifique `python -m pytest -q` antes de rodar mudancas.
+8. Acompanhe logs nos primeiros minutos e pause se aparecer erro repetido de conexao, login ou verificacao HTTP.
 
 ## Ramp-up apos dessuspensao
 
@@ -38,3 +40,4 @@ Pare o processo se aparecer:
 - erros repetidos de verificacao HTTP
 - muitos candidatos irrelevantes por minuto
 - alertas duplicados
+- fila de revisao crescendo sem regra correspondente

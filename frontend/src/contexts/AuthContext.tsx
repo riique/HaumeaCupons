@@ -1,12 +1,14 @@
 import { onAuthStateChanged, signOut, type User } from 'firebase/auth'
+import { doc, getDoc } from 'firebase/firestore'
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 
-import { auth, firebaseConfigReady } from '../firebase'
+import { auth, db, firebaseConfigReady } from '../firebase'
 
 type AuthContextValue = {
   user: User | null
   loading: boolean
   ready: boolean
+  isAdmin: boolean
   logout: () => Promise<void>
 }
 
@@ -15,6 +17,7 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined)
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
+  const [isAdmin, setIsAdmin] = useState(false)
 
   useEffect(() => {
     const firebaseAuth = auth
@@ -25,7 +28,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const unsubscribe = onAuthStateChanged(firebaseAuth, (nextUser) => {
       setUser(nextUser)
-      setLoading(false)
+      setIsAdmin(false)
+      if (!nextUser || !db) {
+        setLoading(false)
+        return
+      }
+
+      void getDoc(doc(db, 'admins', nextUser.uid))
+        .then((snap) => setIsAdmin(snap.exists()))
+        .catch(() => setIsAdmin(false))
+        .finally(() => setLoading(false))
     })
     return unsubscribe
   }, [])
@@ -35,8 +47,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const value = useMemo(
-    () => ({ user, loading, ready: firebaseConfigReady, logout }),
-    [user, loading, logout],
+    () => ({ user, loading, ready: firebaseConfigReady, isAdmin, logout }),
+    [user, loading, isAdmin, logout],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

@@ -30,6 +30,12 @@ function formatPrice(value: Finding['price_found']) {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 2 }).format(n)
 }
 
+function statusLabel(finding: Finding) {
+  if (finding.decision === 'review') return 'Revisão'
+  if (finding.decision === 'rejected') return 'Rejeitado'
+  return finding.price_ok ? 'Aprovado' : 'Fora da faixa'
+}
+
 function FindingsTable({ findings, onDelete, onClearAll }: FindingsTableProps) {
   const [pendingDelete, setPendingDelete] = useState<Finding | null>(null)
   const [pendingClear, setPendingClear] = useState(false)
@@ -85,7 +91,14 @@ function FindingsTable({ findings, onDelete, onClearAll }: FindingsTableProps) {
                     <span className="line-clamp-1 text-sm text-txt-secondary">{f.source_group || '—'}</span>
                   </td>
                   <td className="max-w-xs px-4 py-3">
-                    <span className="line-clamp-1 text-sm text-txt-primary">{f.product_keyword || '—'}</span>
+                    <span className="line-clamp-1 text-sm text-txt-primary">{f.detected_title || f.product_title || f.product_keyword || '—'}</span>
+                    {(f.merchant || f.message_type || typeof f.confidence === 'number') && (
+                      <span className="mt-0.5 block truncate text-2xs text-txt-muted">
+                        {[f.merchant, f.message_type, typeof f.confidence === 'number' ? `${Math.round(f.confidence * 100)}%` : '']
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-3">
                     {f.coupons && f.coupons.length > 0 ? (
@@ -136,13 +149,20 @@ function FindingsTable({ findings, onDelete, onClearAll }: FindingsTableProps) {
                   <td className="px-4 py-3">
                     <span
                       className={`inline-flex items-center rounded-full px-2 py-0.5 text-2xs font-medium ${
-                        f.price_ok
+                        f.decision === 'review'
+                          ? 'bg-amber-500/10 text-amber-400'
+                          : f.price_ok
                           ? 'bg-haumea-600/10 text-haumea-400'
                           : 'bg-panel-hover text-txt-muted'
                       }`}
                     >
-                      {f.price_ok ? 'Aprovado' : 'Fora da faixa'}
+                      {statusLabel(f)}
                     </span>
+                    {(f.rule_name || f.price_source) && (
+                      <span className="mt-1 block max-w-32 truncate text-2xs text-txt-muted">
+                        {[f.rule_name, f.price_source].filter(Boolean).join(' · ')}
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-3">
                     {f.raw_message?.trim() ? (
@@ -180,7 +200,7 @@ function FindingsTable({ findings, onDelete, onClearAll }: FindingsTableProps) {
       {pendingDelete && onDelete && (
         <ConfirmDialog
           title="Excluir alerta"
-          message={`Deseja excluir o alerta de "${pendingDelete.product_keyword || 'sem keyword'}"?`}
+          message={`Deseja excluir o alerta de "${pendingDelete.detected_title || pendingDelete.product_title || pendingDelete.product_keyword || 'sem produto'}"?`}
           onCancel={() => setPendingDelete(null)}
           onConfirm={() => { onDelete(pendingDelete.id); setPendingDelete(null) }}
         />

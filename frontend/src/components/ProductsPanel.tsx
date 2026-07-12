@@ -20,7 +20,15 @@ type ProductFormProps = {
   onSubmit: (product: ProductPayload) => void
 }
 
-const emptyProduct: ProductPayload = { keywords: [], max_price: 0 }
+const emptyProduct: ProductPayload = {
+  keywords: [],
+  max_price: 0,
+  min_price: null,
+  exclude_terms: [],
+  merchants: [],
+  category: '',
+  auto_approve: true,
+}
 
 function formatPrice(value: number) {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 2 }).format(value)
@@ -97,7 +105,7 @@ function KeywordInput({
       onChange([...value, ...imported])
       closeImport()
     } catch {
-      setImportError('JSON inválido. Use o formato: ["palavra1", "palavra2"]')
+      setImportError('JSON inválido. Use o formato: ["iphone", "smartphone apple"]')
     }
   }
 
@@ -143,7 +151,7 @@ function KeywordInput({
       {isImporting && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
           <div className="w-full max-w-md rounded-lg border border-panel-border bg-panel-surface p-4 shadow-xl">
-            <h3 className="text-sm font-semibold text-txt-primary">Importar palavras-chave</h3>
+            <h3 className="text-sm font-semibold text-txt-primary">Importar termos de regra</h3>
             <textarea
               value={importDraft}
               onChange={(e) => { setImportDraft(e.target.value); setImportError('') }}
@@ -177,27 +185,66 @@ function KeywordInput({
 
 // ── form ─────────────────────────────────────────────────────────────────────
 function ProductForm({ disabled, initialValue = emptyProduct, submitLabel, onCancel, onSubmit }: ProductFormProps) {
+  const [name, setName] = useState(initialValue.name ?? '')
   const [keywords, setKeywords] = useState<string[]>(initialValue.keywords)
+  const [excludeTerms, setExcludeTerms] = useState<string[]>(initialValue.exclude_terms ?? [])
+  const [minPrice, setMinPrice] = useState(initialValue.min_price === null || initialValue.min_price === undefined ? '' : String(initialValue.min_price))
   const [maxPrice, setMaxPrice] = useState(String(initialValue.max_price))
+  const [autoApprove, setAutoApprove] = useState(initialValue.auto_approve ?? true)
   const [error, setError] = useState('')
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const max = Number(maxPrice)
-    if (keywords.length === 0) { setError('Informe ao menos uma palavra-chave.'); return }
+    const min = minPrice.trim() ? Number(minPrice) : null
+    if (keywords.length === 0) { setError('Informe ao menos um termo para a regra.'); return }
+    if (min !== null && (!Number.isFinite(min) || min < 0)) { setError('Informe um preço mínimo válido.'); return }
     if (!Number.isFinite(max) || max < 0) { setError('Informe um preço máximo válido.'); return }
+    if (min !== null && min > max) { setError('O preço mínimo não pode ser maior que o máximo.'); return }
     setError('')
-    onSubmit({ keywords, max_price: max })
+    onSubmit({
+      name: name.trim(),
+      keywords,
+      min_price: min,
+      max_price: max,
+      exclude_terms: excludeTerms,
+      merchants: initialValue.merchants ?? [],
+      category: initialValue.category ?? '',
+      auto_approve: autoApprove,
+    })
   }
 
   return (
     <form
-      className="grid gap-3 rounded-lg border border-panel-border bg-panel-surface p-4 sm:grid-cols-[1fr_160px_auto]"
+      className="grid gap-3 rounded-lg border border-panel-border bg-panel-surface p-4 sm:grid-cols-[1fr_160px_160px_auto]"
       onSubmit={handleSubmit}
     >
+      <label className="space-y-1.5 sm:col-span-4">
+        <span className="text-2xs font-medium uppercase tracking-wide text-txt-muted">Nome da regra</span>
+        <input
+          className={inputCls}
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Notebook gamer, iPhone, SSD..."
+          disabled={disabled}
+        />
+      </label>
       <label className="space-y-1.5">
-        <span className="text-2xs font-medium uppercase tracking-wide text-txt-muted">Palavras-chave</span>
+        <span className="text-2xs font-medium uppercase tracking-wide text-txt-muted">Termos da regra</span>
         <KeywordInput value={keywords} onChange={setKeywords} disabled={disabled} />
+      </label>
+      <label className="space-y-1.5">
+        <span className="text-2xs font-medium uppercase tracking-wide text-txt-muted">Preço mín (R$)</span>
+        <input
+          className={inputCls}
+          min="0"
+          step="0.01"
+          type="number"
+          placeholder="opcional"
+          value={minPrice}
+          onChange={(e) => setMinPrice(e.target.value)}
+          disabled={disabled}
+        />
       </label>
       <label className="space-y-1.5">
         <span className="text-2xs font-medium uppercase tracking-wide text-txt-muted">Preço máx (R$)</span>
@@ -235,7 +282,21 @@ function ProductForm({ disabled, initialValue = emptyProduct, submitLabel, onCan
           </button>
         )}
       </div>
-      {error && <p className="text-sm text-danger sm:col-span-3">{error}</p>}
+      <label className="space-y-1.5 sm:col-span-3">
+        <span className="text-2xs font-medium uppercase tracking-wide text-txt-muted">Termos negativos</span>
+        <KeywordInput value={excludeTerms} onChange={setExcludeTerms} disabled={disabled} />
+      </label>
+      <label className="flex items-center gap-2 self-end text-sm text-txt-secondary">
+        <input
+          checked={autoApprove}
+          className="h-4 w-4 accent-haumea-600"
+          type="checkbox"
+          onChange={(e) => setAutoApprove(e.target.checked)}
+          disabled={disabled}
+        />
+        Aprovação automática
+      </label>
+      {error && <p className="text-sm text-danger sm:col-span-4">{error}</p>}
     </form>
   )
 }
@@ -255,7 +316,7 @@ function ProductsPanel({ products, disabled, onAdd, onDelete, onEdit }: Products
         <div>
           <h2 className="text-lg font-semibold text-txt-primary tracking-tight">Produtos</h2>
           <p className="mt-1 text-sm text-txt-muted">
-            Palavras-chave e preço máximo monitorados pelo bot.
+            Regras opcionais para aplicar preço máximo quando uma oferta mencionar estes termos.
           </p>
         </div>
         <button
@@ -295,6 +356,9 @@ function ProductsPanel({ products, disabled, onAdd, onDelete, onEdit }: Products
                 key={product.id}
               >
                 <div className="min-w-0 flex-1">
+                  {product.name && (
+                    <p className="mb-1.5 truncate text-sm font-medium text-txt-primary">{product.name}</p>
+                  )}
                   <div className="flex flex-wrap gap-1.5">
                     {product.keywords.map((kw) => (
                       <span
@@ -306,8 +370,14 @@ function ProductsPanel({ products, disabled, onAdd, onDelete, onEdit }: Products
                     ))}
                   </div>
                   <p className="mt-1.5 text-2xs text-txt-muted font-mono">
-                    até {formatPrice(product.max_price)}
+                    {product.min_price ? `de ${formatPrice(product.min_price)} ` : ''}até {formatPrice(product.max_price)}
+                    {product.auto_approve === false ? ' · revisão manual' : ''}
                   </p>
+                  {product.exclude_terms && product.exclude_terms.length > 0 && (
+                    <p className="mt-1 text-2xs text-txt-muted">
+                      exclui: {product.exclude_terms.join(', ')}
+                    </p>
+                  )}
                 </div>
                 <div className="flex items-center gap-1.5 ml-4">
                   <button
@@ -338,7 +408,7 @@ function ProductsPanel({ products, disabled, onAdd, onDelete, onEdit }: Products
       {pendingDelete && (
         <ConfirmDialog
           title="Excluir produto"
-          message={`Deseja excluir o produto com as palavras-chave "${pendingDelete.keywords.join(', ')}"?`}
+          message={`Deseja excluir a regra com os termos "${pendingDelete.keywords.join(', ')}"?`}
           disabled={disabled}
           onCancel={() => setPendingDelete(null)}
           onConfirm={() => { onDelete(pendingDelete.id); setPendingDelete(null) }}

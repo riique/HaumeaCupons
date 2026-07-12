@@ -49,6 +49,7 @@ type DashboardContext = {
   state: ApiState
   isLoading: boolean
   isMutating: boolean
+  isAdmin: boolean
   addProduct: (product: ProductPayload) => void
   editProduct: (id: number | string, product: ProductPayload) => void
   deleteProduct: (id: number | string) => void
@@ -93,14 +94,35 @@ function DashboardLayout({
   deleteFinding,
   clearFindings,
 }: DashboardLayoutProps) {
-  const { user, logout } = useAuth()
+  const { user, logout, isAdmin } = useAuth()
 
   if (!user) return <Navigate to="/login" replace />
+
+  if (!isAdmin) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-panel-bg px-4 text-txt-primary">
+        <section className="w-full max-w-md rounded-lg border border-panel-border bg-panel-surface p-6">
+          <h1 className="text-lg font-semibold tracking-tight">Acesso restrito</h1>
+          <p className="mt-2 text-sm text-txt-muted">
+            Esta conta ainda não possui permissão administrativa para acessar o painel.
+          </p>
+          <button
+            className="mt-5 inline-flex h-9 items-center justify-center rounded-md border border-panel-border px-4 text-sm text-txt-secondary transition hover:bg-panel-hover"
+            type="button"
+            onClick={() => void logout()}
+          >
+            Sair
+          </button>
+        </section>
+      </main>
+    )
+  }
 
   const context: DashboardContext = {
     state,
     isLoading,
     isMutating,
+    isAdmin,
     addProduct,
     editProduct,
     deleteProduct,
@@ -153,14 +175,14 @@ function OverviewRoute() {
 }
 
 function ProductsRoute() {
-  const { state, isLoading, isMutating, addProduct, editProduct, deleteProduct } = useDashboardContext()
+  const { state, isLoading, isMutating, isAdmin, addProduct, editProduct, deleteProduct } = useDashboardContext()
 
   if (isLoading) return <LoadingState />
 
   return (
     <ProductsPanel
       products={state.products}
-      disabled={isMutating}
+      disabled={isMutating || !isAdmin}
       onAdd={addProduct}
       onDelete={deleteProduct}
       onEdit={editProduct}
@@ -169,21 +191,21 @@ function ProductsRoute() {
 }
 
 function FindingsRoute() {
-  const { state, isLoading, deleteFinding, clearFindings } = useDashboardContext()
+  const { state, isLoading, isAdmin, deleteFinding, clearFindings } = useDashboardContext()
 
   if (isLoading) return <LoadingState />
 
   return (
     <FindingsTable
       findings={state.findings.slice(0, 200)}
-      onDelete={deleteFinding}
-      onClearAll={clearFindings}
+      onDelete={isAdmin ? deleteFinding : undefined}
+      onClearAll={isAdmin ? clearFindings : undefined}
     />
   )
 }
 
 function App() {
-  const { user, loading: authLoading, ready: authReady } = useAuth()
+  const { user, loading: authLoading, ready: authReady, isAdmin } = useAuth()
   const [state, setState] = useState<ApiState>(emptyState)
   const [isLoading, setIsLoading] = useState(true)
   const [isMutating, setIsMutating] = useState(false)
@@ -229,25 +251,30 @@ function App() {
 
   useEffect(() => {
     if (!user) return
+    if (!isAdmin) {
+      setState(emptyState)
+      setIsLoading(false)
+      return
+    }
     void loadState(true)
-  }, [loadState, user])
+  }, [isAdmin, loadState, user])
 
   useEffect(() => {
-    if (!user) return undefined
+    if (!user || !isAdmin) return undefined
     const id = window.setInterval(() => void refreshFindings(), 30_000)
     return () => window.clearInterval(id)
-  }, [refreshFindings, user])
+  }, [isAdmin, refreshFindings, user])
 
   const addProduct = (p: ProductPayload) =>
-    mutate(() => addProductToFirestore(p))
+    isAdmin ? mutate(() => addProductToFirestore(p)) : setError('Apenas administradores podem alterar regras.')
   const editProduct = (id: number | string, p: ProductPayload) =>
-    mutate(() => updateProductInFirestore(id, p))
+    isAdmin ? mutate(() => updateProductInFirestore(id, p)) : setError('Apenas administradores podem alterar regras.')
   const deleteProduct = (id: number | string) =>
-    mutate(() => deleteProductFromFirestore(id))
+    isAdmin ? mutate(() => deleteProductFromFirestore(id)) : setError('Apenas administradores podem excluir regras.')
   const deleteFinding = (id: number | string) =>
-    mutate(() => deleteFindingFromFirestore(id))
+    isAdmin ? mutate(() => deleteFindingFromFirestore(id)) : setError('Apenas administradores podem excluir alertas.')
   const clearFindings = () =>
-    mutate(() => clearAllFindings())
+    isAdmin ? mutate(() => clearAllFindings()) : setError('Apenas administradores podem limpar alertas.')
 
   if (authLoading) {
     return (
@@ -281,6 +308,7 @@ function App() {
               state={state}
               isLoading={isLoading}
               isMutating={isMutating}
+              isAdmin={isAdmin}
               error={error}
               addProduct={addProduct}
               editProduct={editProduct}

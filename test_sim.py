@@ -15,12 +15,14 @@ import app as dashboard_app
 from config import Product, Settings, load_settings
 from hermes_notify import build_hmac_signature, canonical_json_bytes, notify_hermes_finding
 from main import build_handler
+from offers import classify_offer_message
 from storage import add_finding, get_findings
 from verifier import (
     VerificationResult,
     check_price_range,
     extract_coupons,
     extract_links,
+    match_price_range,
     parse_price,
     validate_public_url,
 )
@@ -74,6 +76,65 @@ def test_extract_links_and_coupons() -> None:
     text = "Notebook em promo https://example.com/oferta. https://example.com/oferta Cupom: SAVE10"
     assert extract_links(text) == ["https://example.com/oferta"]
     assert extract_coupons(text) == ["SAVE10"]
+
+
+def test_classifies_product_offer_without_keyword() -> None:
+    text = (
+        "Power Bank Samsung 20000mAh via Mercado Livre\n"
+        "De R$449 por R$215 + frete grátis\n"
+        "Cupom: OFERTA10\n"
+        "https://meli.la/teste"
+    )
+
+    offer = classify_offer_message(
+        text,
+        ["https://meli.la/teste"],
+        ["OFERTA10"],
+    )
+
+    assert offer.accepted is True
+    assert offer.message_type == "product_offer"
+    assert offer.product_title == "Power Bank Samsung 20000mAh via Mercado Livre"
+    assert offer.price == 215.0
+    assert offer.old_price == 449.0
+    assert offer.merchant == "Mercado Livre"
+
+
+def test_rejects_coupon_only_message_without_product() -> None:
+    text = "CUPOM SHOPEE LIBERADO\nR$100 OFF acima de R$999\nResgate aqui: https://s.shopee.com.br/teste"
+
+    offer = classify_offer_message(text, ["https://s.shopee.com.br/teste"], [])
+
+    assert offer.accepted is False
+    assert offer.message_type == "coupon_only"
+    assert offer.price is None
+
+
+def test_rejects_generic_titles_that_used_to_be_false_positives() -> None:
+    samples = [
+        "OLHE ESSE\nPor R$ 19,90\nhttps://s.shopee.com.br/teste",
+        "Pasta\nPor R$ 9,90\nhttps://s.shopee.com.br/teste",
+        "Corre\nPor R$ 49,90\nhttps://s.shopee.com.br/teste",
+        "Oferta\nPor R$ 29,90\nhttps://s.shopee.com.br/teste",
+    ]
+
+    for text in samples:
+        offer = classify_offer_message(text, ["https://s.shopee.com.br/teste"], [])
+        assert offer.accepted is False
+        assert offer.product_title == ""
+
+
+def test_match_price_range_respects_negative_terms() -> None:
+    products = [
+        Product(
+            keywords=["iphone"],
+            max_price=5000.0,
+            exclude_terms=["capinha", "pelicula"],
+        )
+    ]
+
+    assert match_price_range("iPhone 15 por R$ 4.500,00", products) == (4500.0, True, "iphone")
+    assert match_price_range("Capinha iPhone por R$ 49,90", products) == (49.90, False, "")
 
 
 def test_parse_price_formats() -> None:
@@ -182,6 +243,39 @@ def test_handler_saves_finding_without_sending_telegram_message(monkeypatch) -> 
             assert len(findings) == 1
             assert findings[0]["product_keyword"] == "notebook"
             assert findings[0]["source_group"] == "Dummy Login Test Group"
+
+    asyncio.run(run_case())
+
+
+def test_handler_audits_signal_offer_without_keyword_but_does_not_save_finding(monkeypatch) -> None:
+    monkeypatch.setenv("FIRESTORE_SYNC_FINDINGS", "false")
+    monkeypatch.delenv("STORE_REVIEW_FINDINGS", raising=False)
+
+    async def run_case() -> None:
+        with TemporaryDirectory() as tmp:
+            settings = Settings(
+                api_id=1,
+                api_hash="hash",
+                phone="+5500000000000",
+                chat_groups="all",
+                products=[],
+                keywords=[],
+                logs_dir=Path(tmp),
+                detection_mode="signals",
+            )
+            event = DummyEvent(
+                "Power Bank Samsung 20000mAh via Mercado Livre\n"
+                "De R$449 por R$215 + frete grátis\n"
+                "Cupom: OFERTA10\n"
+                "https://meli.la/teste"
+            )
+
+            with patch("main.verify_links", return_value=[]) as verify_links_mock:
+                await build_handler(settings)(event)
+
+            findings = get_findings(db_path=Path(tmp) / "findings.sqlite3")
+            assert findings == []
+            verify_links_mock.assert_not_called()
 
     asyncio.run(run_case())
 

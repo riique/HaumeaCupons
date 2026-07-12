@@ -40,15 +40,19 @@ Objetivo:
 11. Subir o bot com:
     `python main.py`
 12. Configurar ambos como servicos persistentes do servidor, garantindo restart automatico.
+    - Para o bot, usar `ops/haumea-cupons-bot.service` como base do `systemd --user`.
 13. Verificar:
     - `python -m pytest -q`
+    - `cd frontend && npm run build`
     - resposta de `/api/state`
+    - resposta de `/healthz`
     - logs sem erro de login/conexao
 
 Regras de seguranca:
 - Nunca commitar `.env`, `haumea_cupons.session`, logs, bancos SQLite ou build `frontend/dist`.
 - Nao expor o dashboard publicamente sem `DASHBOARD_API_KEY` ou camada adicional de acesso.
 - Rodar apenas uma instancia de `python main.py`.
+- Nao usar Cloud Run ou Cloud Functions; producao usa Firebase Hosting + Firestore direto no frontend e bot via systemd.
 - Se aparecer erro repetido do Telegram, parar o bot e investigar antes de reiniciar.
 ```
 

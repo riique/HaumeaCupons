@@ -20,21 +20,22 @@ function relativeTime(iso: string) {
 function Overview({ state }: OverviewProps) {
   const { products, findings } = state
   const approvedFindings = findings.filter((f) => f.price_ok)
-  const totalKeywords = products.reduce((acc, p) => acc + p.keywords.length, 0)
+  const reviewFindings = findings.filter((f) => f.decision === 'review')
+  const totalRuleTerms = products.reduce((acc, p) => acc + p.keywords.length, 0)
 
   const cards = [
     {
-      label: 'Produtos Monitorados',
+      label: 'Regras de Preço',
       value: products.length,
-      sub: `${totalKeywords} palavra${totalKeywords !== 1 ? 's' : ''}-chave`,
+      sub: `${totalRuleTerms} termo${totalRuleTerms !== 1 ? 's' : ''}`,
       icon: Package,
       accent: 'text-haumea-400',
       bg: 'bg-haumea-600/8',
     },
     {
-      label: 'Alertas Capturados',
+      label: 'Alertas / Revisão',
       value: findings.length,
-      sub: 'total histórico',
+      sub: `${reviewFindings.length} em revisão`,
       icon: Radio,
       accent: 'text-amber-400',
       bg: 'bg-amber-500/8',
@@ -76,7 +77,7 @@ function Overview({ state }: OverviewProps) {
 
       {/* products list */}
       <div className="space-y-3">
-        <h3 className="text-sm font-semibold text-txt-primary">Produtos Configurados</h3>
+        <h3 className="text-sm font-semibold text-txt-primary">Regras Configuradas</h3>
         {products.length === 0 ? (
           <p className="rounded-lg border border-panel-border bg-panel-surface px-5 py-5 text-sm text-txt-muted">
             Nenhum produto cadastrado.
@@ -127,7 +128,7 @@ function Overview({ state }: OverviewProps) {
                 <div className={`h-2 w-2 shrink-0 rounded-full ${f.price_ok ? 'bg-haumea-400' : 'bg-txt-muted'}`} />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-baseline gap-2">
-                    <span className="truncate text-sm text-txt-primary">{f.product_keyword || '—'}</span>
+                    <span className="truncate text-sm text-txt-primary">{f.detected_title || f.product_title || f.product_keyword || '—'}</span>
                     <span className="shrink-0 text-2xs text-txt-muted">{f.source_group}</span>
                   </div>
                   {f.url && (

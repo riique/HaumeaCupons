@@ -27,7 +27,7 @@ from firebase_setup import (
     save_product as firestore_save_product,
     verify_id_token,
 )
-from storage import DEFAULT_DB_FILE, LEGACY_ALERTS_FILE, get_findings, init_findings_db, migrate_alerts_jsonl
+from storage import DEFAULT_DB_FILE, LEGACY_ALERTS_FILE, get_findings, get_message_event_stats, init_findings_db, migrate_alerts_jsonl
 
 
 FRONTEND_DIST = Path("frontend/dist")
@@ -38,6 +38,12 @@ FINDINGS_DB_FILE = DEFAULT_DB_FILE
 class ProductPayload(BaseModel):
     keywords: list[str] = Field(min_length=1, max_length=20)
     max_price: float = Field(ge=0)
+    name: str = ""
+    min_price: float | None = Field(default=None, ge=0)
+    exclude_terms: list[str] = Field(default_factory=list, max_length=50)
+    merchants: list[str] = Field(default_factory=list, max_length=20)
+    category: str = ""
+    auto_approve: bool = True
 
     @field_validator("keywords")
     @classmethod
@@ -48,6 +54,12 @@ class ProductPayload(BaseModel):
         if any(len(keyword) > 80 for keyword in cleaned):
             raise ValueError("Cada palavra-chave deve ter no maximo 80 caracteres")
         return list(dict.fromkeys(cleaned))  # dedupe, preserve order
+
+    @field_validator("exclude_terms", "merchants")
+    @classmethod
+    def normalize_string_list(cls, value: list[str]) -> list[str]:
+        cleaned = [k.strip().lower() for k in value if k.strip()]
+        return list(dict.fromkeys(cleaned))
 
 
 class ProductResponse(ProductPayload):
@@ -82,6 +94,22 @@ class FindingResponse(BaseModel):
     links: list[str] = Field(default_factory=list)
     source_chat_id: str = ""
     source_message_id: str = ""
+    product_title: str = ""
+    merchant: str = ""
+    message_type: str = ""
+    match_reason: str = ""
+    confidence: float | None = None
+    raw_message: str = ""
+    message_hash: str = ""
+    url_hash: str = ""
+    decision: str = "approved"
+    matched_rule_id: str = ""
+    rule_name: str = ""
+    detected_title: str = ""
+    price_source: str = ""
+    reason_codes: list[str] = Field(default_factory=list)
+    score_breakdown: dict[str, float] = Field(default_factory=dict)
+    schema_version: int = 1
     user_id: str = "bot"
 
 
@@ -108,7 +136,36 @@ class FindingPayload(BaseModel):
     links: list[str] = Field(default_factory=list)
     source_chat_id: str = ""
     source_message_id: str = ""
+    product_title: str = ""
+    merchant: str = ""
+    message_type: str = ""
+    match_reason: str = ""
+    confidence: float | None = None
+    raw_message: str = ""
+    message_hash: str = ""
+    url_hash: str = ""
+    decision: str = "approved"
+    matched_rule_id: str = ""
+    rule_name: str = ""
+    detected_title: str = ""
+    price_source: str = ""
+    reason_codes: list[str] = Field(default_factory=list)
+    score_breakdown: dict[str, float] = Field(default_factory=dict)
+    schema_version: int = 2
     user_id: str = "bot"
+
+
+class MessageEventStatsResponse(BaseModel):
+    source_group: str
+    decision: str
+    message_type: str
+    total: int
+    avg_confidence: float | None = None
+    with_price: int
+    with_links: int
+    with_coupons: int
+    first_seen: str
+    last_seen: str
 
 
 class TokenPayload(BaseModel):
@@ -163,6 +220,23 @@ async def require_dashboard_api_key(request: Request, call_next):
         content={"detail": "Token Firebase ou chave do dashboard inválida"},
         headers={"WWW-Authenticate": "Bearer"},
     )
+
+
+@app.get("/healthz", include_in_schema=False)
+async def healthz() -> dict[str, Any]:
+    sqlite_ok = False
+    try:
+        init_findings_db(FINDINGS_DB_FILE)
+        with closing(sqlite3.connect(FINDINGS_DB_FILE)) as conn:
+            conn.execute("SELECT 1").fetchone()
+        sqlite_ok = True
+    except Exception:
+        sqlite_ok = False
+    return {
+        "ok": sqlite_ok,
+        "sqlite": "ok" if sqlite_ok else "error",
+        "frontend_dist": FRONTEND_INDEX.exists(),
+    }
 
 
 def load_data() -> dict[str, Any]:
@@ -227,13 +301,29 @@ def _product_response(product: dict[str, Any], fallback: int) -> ProductResponse
     normalized = dict(product)
     if "keyword" in normalized and "keywords" not in normalized:
         normalized["keywords"] = [normalized.pop("keyword")]
-    if "min_price" in normalized:
-        normalized.pop("min_price", None)
+    if "matchTerms" in normalized and "keywords" not in normalized:
+        normalized["keywords"] = normalized["matchTerms"]
+    if "match_terms" in normalized and "keywords" not in normalized:
+        normalized["keywords"] = normalized["match_terms"]
+    if "maxPrice" in normalized and "max_price" not in normalized:
+        normalized["max_price"] = normalized["maxPrice"]
+    if "minPrice" in normalized and "min_price" not in normalized:
+        normalized["min_price"] = normalized["minPrice"]
+    if "excludeTerms" in normalized and "exclude_terms" not in normalized:
+        normalized["exclude_terms"] = normalized["excludeTerms"]
+    if "autoApprove" in normalized and "auto_approve" not in normalized:
+        normalized["auto_approve"] = normalized["autoApprove"]
     payload = ProductPayload.model_validate(normalized)
     return ProductResponse(
         id=_product_id(product, fallback),
+        name=payload.name,
         keywords=payload.keywords,
         max_price=payload.max_price,
+        min_price=payload.min_price,
+        exclude_terms=payload.exclude_terms,
+        merchants=payload.merchants,
+        category=payload.category,
+        auto_approve=payload.auto_approve,
         active=bool(product.get("active", True)),
         created_by=str(product.get("created_by", product.get("createdBy", "")) or ""),
         created_at=str(product.get("created_at", product.get("createdAt", "")) or ""),
@@ -252,8 +342,14 @@ def _normalize_products_for_storage(raw_products: Any) -> tuple[list[dict[str, A
         normalized.append(
             {
                 "id": response.id,
+                "name": response.name,
                 "keywords": response.keywords,
                 "max_price": response.max_price,
+                "min_price": response.min_price,
+                "exclude_terms": response.exclude_terms,
+                "merchants": response.merchants,
+                "category": response.category,
+                "auto_approve": response.auto_approve,
             }
         )
 
@@ -308,6 +404,25 @@ async def api_findings(
     )
 
 
+@app.get("/api/message-stats", response_model=list[MessageEventStatsResponse])
+async def api_message_stats(limit: int = Query(50, ge=1, le=200)) -> list[MessageEventStatsResponse]:
+    return [MessageEventStatsResponse.model_validate(item) for item in get_message_event_stats(limit, FINDINGS_DB_FILE)]
+
+
+@app.get("/api/metrics")
+async def api_metrics() -> dict[str, Any]:
+    findings = get_findings(500, 0, FINDINGS_DB_FILE)
+    decisions: dict[str, int] = {}
+    for finding in findings:
+        decision = str(finding.get("decision") or "approved")
+        decisions[decision] = decisions.get(decision, 0) + 1
+    return {
+        "findings_window": len(findings),
+        "decisions": decisions,
+        "message_event_stats": get_message_event_stats(20, FINDINGS_DB_FILE),
+    }
+
+
 @app.get("/api/products", response_model=list[ProductResponse])
 async def api_products() -> list[ProductResponse]:
     firestore_products = firestore_list_products()
@@ -327,8 +442,14 @@ async def create_product(payload: ProductPayload, request: Request) -> ProductRe
     products = [product for product in (firestore_products if firestore_products is not None else data.get("products", [])) if isinstance(product, dict)]
     product = {
         "id": _next_product_id(products),
+        "name": payload.name,
         "keywords": payload.keywords,
         "max_price": payload.max_price,
+        "min_price": payload.min_price,
+        "exclude_terms": payload.exclude_terms,
+        "merchants": payload.merchants,
+        "category": payload.category,
+        "auto_approve": payload.auto_approve,
     }
     firestore_product = firestore_save_product(product, created_by=_request_user_id(request))
     if firestore_product is not None:
@@ -347,8 +468,14 @@ async def update_product(product_id: str, payload: ProductPayload, request: Requ
     index = _product_index(products, product_id)
     product = {
         "id": int(product_id) if product_id.isdigit() else product_id,
+        "name": payload.name,
         "keywords": payload.keywords,
         "max_price": payload.max_price,
+        "min_price": payload.min_price,
+        "exclude_terms": payload.exclude_terms,
+        "merchants": payload.merchants,
+        "category": payload.category,
+        "auto_approve": payload.auto_approve,
     }
     firestore_product = firestore_save_product(product, created_by=_request_user_id(request))
     if firestore_product is not None:
@@ -425,6 +552,21 @@ async def create_finding(payload: FindingPayload) -> FindingResponse:
         links=payload.links,
         source_chat_id=payload.source_chat_id,
         source_message_id=payload.source_message_id,
+        message_hash=payload.message_hash,
+        url_hash=payload.url_hash,
+        product_title=payload.product_title,
+        merchant=payload.merchant,
+        message_type=payload.message_type,
+        match_reason=payload.match_reason,
+        confidence=payload.confidence,
+        raw_message=payload.raw_message,
+        decision=payload.decision,
+        matched_rule_id=payload.matched_rule_id,
+        rule_name=payload.rule_name,
+        detected_title=payload.detected_title,
+        price_source=payload.price_source,
+        reason_codes=payload.reason_codes,
+        score_breakdown=payload.score_breakdown,
         db_path=FINDINGS_DB_FILE,
     )
     saved = get_findings(1, 0, FINDINGS_DB_FILE)[0]

@@ -37,8 +37,18 @@ function productFromDoc(docSnap: QueryDocumentSnapshot<DocumentData>, fallbackIn
   const data = docSnap.data()
   return {
     id: data.id ?? docSnap.id,
-    keywords: Array.isArray(data.keywords) ? data.keywords.map(String) : [],
+    name: String(data.name ?? ''),
+    keywords: Array.isArray(data.matchTerms)
+      ? data.matchTerms.map(String)
+      : (Array.isArray(data.keywords) ? data.keywords.map(String) : []),
     max_price: Number(data.maxPrice ?? data.max_price ?? 0),
+    min_price: data.minPrice ?? data.min_price ?? null,
+    exclude_terms: Array.isArray(data.excludeTerms ?? data.exclude_terms)
+      ? (data.excludeTerms ?? data.exclude_terms).map(String)
+      : [],
+    merchants: Array.isArray(data.merchants) ? data.merchants.map(String) : [],
+    category: String(data.category ?? ''),
+    auto_approve: data.autoApprove ?? data.auto_approve ?? true,
     active: data.active ?? true,
     created_by: String(data.createdBy ?? data.created_by ?? ''),
     created_at: timestampToIso(data.createdAt ?? data.created_at) || String(fallbackIndex),
@@ -59,7 +69,24 @@ function findingFromDoc(docSnap: QueryDocumentSnapshot<DocumentData>): Finding {
     links: Array.isArray(data.links) ? data.links.map(String) : [],
     source_chat_id: String(data.sourceChatId ?? data.source_chat_id ?? ''),
     source_message_id: String(data.sourceMessageId ?? data.source_message_id ?? ''),
+    message_hash: String(data.messageHash ?? data.message_hash ?? ''),
+    url_hash: String(data.urlHash ?? data.url_hash ?? ''),
+    product_title: String(data.productTitle ?? data.product_title ?? ''),
+    merchant: String(data.merchant ?? ''),
+    message_type: String(data.messageType ?? data.message_type ?? ''),
+    match_reason: String(data.matchReason ?? data.match_reason ?? ''),
+    confidence: data.confidence ?? null,
     raw_message: String(data.rawMessage ?? data.raw_message ?? ''),
+    decision: String(data.decision ?? ((data.priceOk ?? data.price_ok) ? 'approved' : 'review')),
+    matched_rule_id: String(data.matchedRuleId ?? data.matched_rule_id ?? ''),
+    rule_name: String(data.ruleName ?? data.rule_name ?? ''),
+    detected_title: String(data.detectedTitle ?? data.detected_title ?? ''),
+    price_source: String(data.priceSource ?? data.price_source ?? ''),
+    reason_codes: Array.isArray(data.reasonCodes ?? data.reason_codes)
+      ? (data.reasonCodes ?? data.reason_codes).map(String)
+      : [],
+    score_breakdown: data.scoreBreakdown ?? data.score_breakdown ?? {},
+    schema_version: Number(data.schemaVersion ?? data.schema_version ?? 1),
     user_id: String(data.userId ?? data.user_id ?? ''),
   }
 }
@@ -73,8 +100,16 @@ export async function fetchProducts(): Promise<Product[]> {
 export async function addProduct(product: ProductPayload): Promise<string> {
   const database = requireDb()
   const ref = await addDoc(collection(database, 'products'), {
+    schemaVersion: 2,
+    name: product.name ?? '',
     keywords: product.keywords,
+    matchTerms: product.keywords,
+    excludeTerms: product.exclude_terms ?? [],
+    merchants: product.merchants ?? [],
+    category: product.category ?? '',
+    autoApprove: product.auto_approve ?? true,
     maxPrice: product.max_price,
+    minPrice: product.min_price ?? null,
     active: product.active ?? true,
     createdBy: auth?.currentUser?.email ?? auth?.currentUser?.uid ?? 'dashboard',
     createdAt: serverTimestamp(),
@@ -89,9 +124,17 @@ export async function updateProduct(id: string | number, product: ProductPayload
   await setDoc(
     doc(database, 'products', String(id)),
     {
+      schemaVersion: 2,
       id,
+      name: product.name ?? '',
       keywords: product.keywords,
+      matchTerms: product.keywords,
+      excludeTerms: product.exclude_terms ?? [],
+      merchants: product.merchants ?? [],
+      category: product.category ?? '',
+      autoApprove: product.auto_approve ?? true,
       maxPrice: product.max_price,
+      minPrice: product.min_price ?? null,
       active: product.active ?? true,
       updatedAt: serverTimestamp(),
     },
@@ -107,7 +150,7 @@ export async function deleteProduct(id: string | number): Promise<void> {
 export async function fetchFindings(limitCount = 200): Promise<Finding[]> {
   const database = requireDb()
   const docs = await getDocs(query(collection(database, 'findings'), orderBy('timestamp', 'desc'), limit(limitCount)))
-  return docs.docs.map(findingFromDoc)
+  return docs.docs.map(findingFromDoc).filter((finding) => finding.decision !== 'review')
 }
 
 export async function deleteFinding(id: string | number): Promise<void> {
